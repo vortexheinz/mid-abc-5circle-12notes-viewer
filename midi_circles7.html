@@ -1,0 +1,600 @@
+﻿<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>MIDI 音階圓盤示波器</title>
+<style>
+  :root{--bg:#0f1220;--panel:#171b2e;--line:#2c3554;--cyan:#00dcff;--pink:#ff3fa4;}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:#e8ecf5;
+    font-family:"Noto Sans TC",system-ui,sans-serif}
+  body{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px}
+  h1{font-size:17px;letter-spacing:1px;margin:0;color:#b9c7e6;font-weight:600}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center}
+  button,label.file{
+    background:var(--panel);color:#cfe3ff;border:1px solid var(--line);
+    padding:7px 13px;border-radius:8px;font-size:13px;cursor:pointer;transition:.15s}
+  button:hover,label.file:hover{border-color:var(--cyan);color:#fff}
+  button.on{background:#0b3d4a;border-color:var(--cyan);color:var(--cyan)}
+  label.file input{display:none}
+  canvas{background:#11162a;border:1px solid #232b45;border-radius:14px;max-width:100%}
+  .tag{font-size:12px;color:#6d7b9c;margin-right:2px}
+  #status{font-size:12px;color:#8fa3c8;min-height:16px}
+  #wsStat{font-size:11px;color:#5a6884}
+</style>
+</head>
+<body>
+<h1>MIDI 音階圓盤示波器</h1>
+
+<div class="bar">
+  <label class="file">📂 載入 MIDI<input type="file" id="file" accept=".mid,.midi"></label>
+  <button id="btnPlay">▶ 播放</button>
+  <button id="btnLoop" class="on">🔁 循環：開</button>
+  <button id="btnReset">⟲ 回到開頭</button>
+</div>
+
+<div class="bar">
+  <span class="tag">內建曲：</span>
+  <button class="song" data-song="0">1 拉科塔搖籃曲</button>
+  <button class="song" data-song="1">2 白水牛</button>
+  <button class="song" data-song="2">3 風的顏色</button>
+</div>
+
+<div class="bar">
+  <span class="tag">顯示模式：</span>
+  <button class="mode on" data-mode="live">即時漸進</button>
+  <button class="mode" data-mode="overview">全曲過渡矩陣</button>
+  <button id="btnWs" class="on">🔌 WS 廣播：開</button>
+</div>
+
+<canvas id="cv" width="1000" height="600"></canvas>
+<div id="status">尚未載入</div>
+<div id="wsStat"></div>
+
+<script>
+/* =========================================================
+   0. 常數（對齊 PDE）
+   ========================================================= */
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const CIRCLE_OF_FIFTHS = [0,7,2,9,4,11,6,1,8,3,10,5];
+const CHROMATIC = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+/* =========================================================
+   1. 內建三首（等同 MIDI 解析後的結果）
+   ========================================================= */
+function mkNoteList(pairs, gap){
+  let t=0, out=[];
+  for(const [pitch,dur] of pairs){ out.push({pitch,time:t,dur}); t+=dur+gap; }
+  return out;
+}
+const BUILTIN = [
+  { name:"拉科塔搖籃曲", notes: mkNoteList(
+       [
+      [66,500],[78,250],[78,250],[76,250],[73,250],[76,250],[73,250],[71,250],
+      [73,750],[76,250],[73,250],[71,250],[73,500],[71,250],[73,750],[66,500],
+      [78,250],[78,250],[76,250],[73,250],[76,250],[73,250],[71,250],[71,500],
+      [69,250],[71,250],[69,250],[66,250],[69,250],[66,250],[66,250],[66,750],
+      [66,500],[78,250],[78,250],[76,250],[73,250],[76,250],[73,250],[73,250],
+      [73,750],[76,250],[73,250],[71,250],[73,500],[76,250],[73,750],[66,500],
+      [78,250],[78,250],[76,250],[73,250],[76,250],[73,250],[71,250],[71,750],
+      [71,250],[69,250],[66,250],[69,500],[66,250],[66,750],[66,500],[66,250],
+      [73,500],[73,250],[71,500],[69,250],[69,750],[71,500],[73,250],[76,500],
+      [73,250],[73,750],[66,500],[73,250],[71,500],[69,250],[71,500],[66,250],
+      [69,500],[71,250],[69,250],[66,250],[69,500],[66,250],[66,750],[71,250],
+      [69,250],[66,250],[69,500],[66,250],[66,750],[66,500],[66,250],[73,500],
+      [73,250],[71,500],[69,250],[69,750],[71,500],[73,250],[76,500],[73,250],
+      [73,750],[66,500],[73,250],[71,500],[69,250],[71,500],[66,250],[69,500],
+      [71,250],[69,250],[66,250],[69,500],[66,250],[66,750],[71,250],[69,250],
+      [66,250],[69,500],[66,250],[66,750]
+      ], 0) },
+  { name:"白水牛", notes: mkNoteList(
+      [
+      [93,250],[91,250],[88,500],[86,500],[91,500],[84,500],[81,500],[93,250],
+      [91,250],[88,250],[86,250],[91,250],[84,500],[88,250],[91,250],[93,250],
+      [96,250],[93,250],[91,250],[88,250],[86,750],[84,250],[86,250],[88,250],
+      [81,500],[84,250],[86,250],[88,250],[81,500],[93,250],[91,250],[88,250],
+      [86,250],[91,500],[84,250],[81,500],[93,250],[91,250],[88,250],[86,250],
+      [91,250],[84,500],[88,250],[91,250],[93,250],[96,250],[93,250],[91,250],
+      [88,250],[86,500],[84,250],[86,250],[88,250],[81,500],[79,500],[81,500],
+      [84,250],[86,250],[88,250],[88,250],[81,1750],[81,500],[84,500],
+      [83,500],[79,500],[81,2000],[93,500],[96,500],[95,500],[91,500],
+      [93,1000],[81,250],[84,250],[83,250],[79,500],[81,1000],[93,250],
+      [96,250],[95,250],[91,250],[93,500],[93,250],[91,250],[88,500],[86,500],
+      [91,500],[84,500],[81,500],[93,250],[91,250],[88,250],[86,250],[91,250],
+      [84,500],[88,250],[91,250],[93,250],[96,250],[93,250],[91,250],[88,250],
+      [86,750],[84,250],[86,250],[88,250],[81,500],[84,250],[86,250],[88,250],
+      [81,500],[93,250],[91,250],[88,250],[86,250],[91,500],[84,250],[81,500],
+      [93,250],[91,250],[88,250],[86,250],[91,250],[84,500],[88,250],[91,250],
+      [93,250],[96,250],[93,250],[91,250],[88,250],[86,500],[84,250],[86,250],
+      [88,250],[81,500],[79,500],[81,500],[84,250],[86,250],[88,250],[88,250],
+      [81,1500],[81,500],[84,250],[83,250],[79,250],[81,1500],[93,250],
+      [96,500],[95,500],[91,500],[93,1000],[81,250],[84,500],[83,500],
+      [79,500],[81,1000],[93,250],[96,250],[95,250],[91,250],[93,1000]
+      ], 180) },
+  { name:"風的顏色", notes: mkNoteList(
+      [
+      [72,500],[76,500],[79,500],[79,500],[76,500],[76,500],[74,500],[74,500],
+      [72,500],[74,1000],[69,1000],[72,500],[76,500],[79,500],[79,500],
+      [76,500],[76,500],[74,500],[74,500],[72,500],[76,1000],[79,500],
+      [81,500],[79,500],[79,500],[76,500],[76,500],[74,500],[74,500],[72,500],
+      [74,1000],[69,1000],[72,250],[76,250],[74,500],[72,250],[76,250],
+      [74,500],[72,500],[69,500],[72,500],[69,500],[72,500],[76,500],[79,500],
+      [79,500],[76,500],[76,500],[74,500],[74,500],[72,500],[74,1000],
+      [69,1000],[72,500],[76,500],[79,500],[79,500],[76,500],[76,500],
+      [74,500],[74,500],[72,500],[76,1000],[79,500],[81,500],[79,500],
+      [79,500],[76,500],[76,500],[74,500],[74,500],[72,500],[74,1000],
+      [69,1000],[72,250],[76,250],[74,500],[72,250],[76,250],[74,500],
+      [72,500],[69,500],[72,500],[72,500],[76,500],[79,500],[84,500],[83,500],
+      [83,500],[81,500],[81,500],[79,500],[76,500],[76,500],[79,500],[81,500],
+      [83,500],[84,500],[83,500],[83,500],[81,500],[81,500],[79,500],[79,500],
+      [76,500],[79,500],[76,500],[79,500],[84,500],[83,500],[83,500],[81,500],
+      [81,500],[79,500],[79,500],[81,500],[79,1000],[76,1000],[72,1000],
+      [69,500],[72,500],[74,500],[76,500],[76,500],[74,500],[74,500],[72,500],
+      [72,500],[69,500],[74,500],[69,500],[72,500],[74,500],[76,500],[76,500],
+      [74,500],[74,500],[72,500],[69,500],[72,500],[72,500],[72,500],[76,500],
+      [79,500],[79,500],[76,500],[76,500],[74,500],[74,500],[72,500],
+      [74,1000],[69,1000],[72,500],[76,500],[79,500],[79,500],[76,500],
+      [76,500],[74,500],[74,500],[72,500],[76,1000],[79,500],[81,500],
+      [79,500],[79,500],[76,500],[76,500],[74,500],[74,500],[72,500],
+      [74,1000],[69,1000],[72,250],[76,250],[74,500],[72,250],[76,250],
+      [74,500],[72,500],[69,500],[72,500],[69,500],[72,500],[76,500],[79,500],
+      [79,500],[76,500],[76,500],[74,500],[74,500],[72,500],[74,1000],
+      [69,1000],[72,500],[76,500],[79,500],[79,500],[76,500],[76,500],
+      [74,500],[74,500],[72,500],[76,1000],[79,500],[81,500],[79,500],
+      [79,500],[76,500],[76,500],[74,500],[74,500],[72,500],[74,1000],
+      [69,1000],[72,250],[76,250],[74,500],[72,250],[76,250],[74,500],
+      [72,500],[69,500],[72,500],[69,500],[72,250],[74,250],[72,250],[74,250],
+      [76,250],[74,250],[76,250],[79,250],[76,250],[79,250],[81,500],[84,500],
+      [83,500],[83,500],[81,500],[81,500],[79,500],[76,500],[76,500],[79,500],
+      [81,500],[83,500],[84,500],[83,500],[83,500],[81,500],[81,500],[79,500],
+      [79,500],[76,500],[79,500],[76,500],[79,500],[84,500],[83,500],[83,500],
+      [81,500],[81,500],[79,500],[79,500],[81,500],[79,1000],[76,1000],
+      [72,1000],[69,500],[72,500],[74,500],[76,500],[76,500],[74,500],
+      [74,500],[72,500],[72,500],[69,500],[74,500],[69,500],[72,500],[74,500],
+      [76,500],[76,500],[74,500],[74,500],[72,500],[69,500],[72,500],
+      [72,2000]
+      ], 0) }
+];
+
+/* =========================================================
+   2. MIDI 解析（SMF：MThd / MTrk / VLQ / running status / tempo map）
+   ========================================================= */
+function parseMidi(arrayBuffer){
+  const d = new DataView(arrayBuffer);
+  let p = 0;
+
+  const u8  = () => d.getUint8(p++);
+  const u16 = () => { const v=d.getUint16(p); p+=2; return v; };
+  const u32 = () => { const v=d.getUint32(p); p+=4; return v; };
+  const str4= () => { const s=String.fromCharCode(d.getUint8(p),d.getUint8(p+1),
+                           d.getUint8(p+2),d.getUint8(p+3)); p+=4; return s; };
+  // VLQ：每個 byte 最高位是 continue bit
+  const vlq = () => { let v=0,b; do{ b=d.getUint8(p++); v=(v<<7)|(b&0x7f); }while(b&0x80); return v; };
+
+  if(str4()!=="MThd") throw new Error("不是標準 MIDI 檔（缺少 MThd）");
+  u32();                        // header length
+  const fmt = u16(), ntrk = u16();
+  let division = u16();
+  if(division & 0x8000) throw new Error("SMPTE 時間格式尚未支援");
+
+  // tempo 事件：{tick(全域), usPerQuarter}
+  const tempoEvents = [{ tick:0, usPQ:500000 }];
+  const rawNotes = [];          // {tick, pitch, durTicks, track}
+  const open = {};              // track_key -> onTick
+
+  for(let t=0; t<ntrk && p+8 <= arrayBuffer.byteLength; t++){
+    if(str4()!=="MTrk") break;
+    const len = u32(); const end = p + len;
+    let tick = 0, runningStatus = 0;
+
+    while(p < end){
+      tick += vlq();
+      let st = d.getUint8(p);
+      if(st < 0x80){ st = runningStatus; }     // running status：沿用上一個 status
+      else { p++; runningStatus = st; }
+
+      const type = st & 0xF0;
+
+      if(st === 0xFF){                          // meta
+        const mt = u8();
+        const ml = vlq();
+        const ms = p;
+        if(mt === 0x51 && ml === 3){
+          const usPQ = (d.getUint8(ms)<<16)|(d.getUint8(ms+1)<<8)|d.getUint8(ms+2);
+          tempoEvents.push({ tick, usPQ });
+        }
+        if(mt === 0x2F && ml === 0){ p = end; break; }  // End of Track
+        p += ml;
+      }
+      else if(st === 0xF0 || st === 0xF7){      // sysex
+        const sl = vlq(); p += sl;
+      }
+      else if(type === 0x90 || type === 0x80){  // note on / off
+        const key = d.getUint8(p);
+        const vel = d.getUint8(p+1);
+        p += 2;
+        const k = t + "_" + key;
+        if(type === 0x90 && vel > 0){
+          if(open[k] === undefined) open[k] = tick;
+        } else {
+          if(open[k] !== undefined){
+            rawNotes.push({ tick: open[k], pitch: key,
+                            durTicks: Math.max(tick - open[k], 1), track: t });
+            delete open[k];
+          }
+        }
+      }
+      else if(type === 0xA0 || type === 0xB0 || type === 0xE0){ p += 2; } // 2 data bytes
+      else if(type === 0xC0 || type === 0xD0){ p += 1; }                  // 1 data byte
+      else { p += 1; }                                                    // 保險
+    }
+    p = end;
+  }
+
+  // tick → ms（支援中途 tempo 變化）
+  tempoEvents.sort((a,b)=>a.tick-b.tick);
+  function tickToMs(tk){
+    let ms = 0, prevTick = 0, usPQ = tempoEvents[0].usPQ;
+    for(const te of tempoEvents){
+      if(te.tick >= tk) break;
+      ms += (te.tick - prevTick) * (usPQ / 1000) / division;
+      prevTick = te.tick; usPQ = te.usPQ;
+    }
+    ms += (tk - prevTick) * (usPQ / 1000) / division;
+    return ms;
+  }
+
+  const notes = rawNotes
+    .map(n => ({ pitch:n.pitch,
+                 time: tickToMs(n.tick),
+                 dur:  tickToMs(n.tick + n.durTicks) - tickToMs(n.tick) }))
+    .sort((a,b)=>a.time - b.time);
+
+  if(!notes.length) throw new Error("檔案內沒有 Note-On 事件");
+  return { notes, division, format: fmt, tracks: ntrk };
+}
+
+/* =========================================================
+   3. 狀態
+   ========================================================= */
+const S = {
+  notes: [],
+  name: "",
+  totalMs: 0,
+  playing: false,
+  loop: true,
+  mode: "live",              // live | overview
+  nowMs: 0,
+  lastFrame: 0,
+  sparked: new Set(),
+  audioCtx: null,
+  wsOn: true,
+  ws: null,
+  wsClients: 0
+};
+
+/* 全曲過渡矩陣（對齊 PDE 的 transitionMatrix / maxTransitionCount）[1] */
+function buildTransition(notes){
+  const m = Array.from({length:12},()=>new Array(12).fill(0));
+  let prev = -1, max = 1;
+  for(const n of notes){
+    const cur = ((n.pitch % 12) + 12) % 12;
+    if(prev >= 0 && prev !== cur){
+      m[prev][cur]++;
+      if(m[prev][cur] > max) max = m[prev][cur];
+    }
+    prev = cur;
+  }
+  return { m, max };
+}
+
+function computeTotal(notes){
+  let e = 0;
+  for(const n of notes) e = Math.max(e, n.time + Math.max(n.dur, 80));
+  return e + 500;
+}
+
+function loadNotes(notes, name){
+  S.notes = notes;
+  S.name = name;
+  S.totalMs = computeTotal(notes);
+  S.nowMs = 0;
+  S.playing = false;
+  S.sparked.clear();
+  document.getElementById("btnPlay").textContent = "▶ 播放";
+  document.getElementById("btnPlay").classList.remove("on");
+  document.getElementById("status").textContent =
+    `${name} — ${notes.length} 音符，總長 ${(S.totalMs/1000).toFixed(1)} 秒`;
+  broadcast({ type:"song", name, notes });
+}
+
+/* =========================================================
+   4. 播放 / 音訊
+   ========================================================= */
+function ensureAudio(){
+  if(!S.audioCtx) S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(S.audioCtx.state === "suspended") S.audioCtx.resume();
+}
+function beep(midi, durMs){
+  if(!S.audioCtx) return;
+  const f = 440 * Math.pow(2, (midi - 69)/12);
+  const t0 = S.audioCtx.currentTime;
+  const dur = Math.min(Math.max(durMs/1000, .08), 1.5);
+  const osc = S.audioCtx.createOscillator();
+  const gain = S.audioCtx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = f;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(0.16, t0 + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+  osc.connect(gain).connect(S.audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.05);
+}
+
+function play(){
+  if(!S.notes.length) return;
+  ensureAudio();
+  S.playing = true;
+  S.lastFrame = performance.now();
+  S.sparked.clear();
+  document.getElementById("btnPlay").textContent = "⏸ 暫停";
+  document.getElementById("btnPlay").classList.add("on");
+}
+function pause(){ S.playing = false;
+  document.getElementById("btnPlay").textContent = "▶ 播放";
+  document.getElementById("btnPlay").classList.remove("on");
+}
+function reset(){ pause(); S.nowMs = 0; S.sparked.clear(); broadcast({type:"seek", ms:0}); }
+
+/* =========================================================
+   5. 繪圖
+   ========================================================= */
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+function nodePos(cx, cy, r, slot){
+  const a = -Math.PI/2 + (Math.PI*2) * (slot/12);
+  return [cx + Math.cos(a)*r, cy + Math.sin(a)*r];
+}
+function currentPitch(){
+  let p = -1;
+  for(const n of S.notes) if(n.time <= S.nowMs) p = n.pitch; else break;
+  return p;
+}
+
+function drawDisc(cx, cy, r, order, color, title){
+  const nowPc = currentPitch() % 12;
+  const cur = currentPitch() >= 0 ? ((currentPitch()%12)+12)%12 : -1;
+
+  // 外環
+  ctx.save();
+  ctx.strokeStyle = "#28324f"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 30, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = "#1d2540";
+  ctx.beginPath(); ctx.arc(cx, cy, r - 36, 0, Math.PI*2); ctx.stroke();
+
+  // 節點
+  for(let slot = 0; slot < 12; slot++){
+    const pc = order[slot];
+    const [x, y] = nodePos(cx, cy, r, slot);
+    const active = S.playing && cur === pc;
+    ctx.beginPath();
+    ctx.arc(x, y, active ? 17 : 13, 0, Math.PI*2);
+    ctx.fillStyle = active ? color : "#1b2338";
+    ctx.fill();
+    ctx.strokeStyle = active ? "#ffffff" : color;
+    ctx.lineWidth = 2; ctx.stroke();
+    if(active){
+      ctx.shadowColor = color; ctx.shadowBlur = 18;
+      ctx.stroke(); ctx.shadowBlur = 0;
+    }
+    ctx.fillStyle = active ? "#06101a" : "#9fb2d4";
+    ctx.font = "bold 11px system-ui";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(NOTE_NAMES[pc], x, y);
+  }
+
+  // 連線
+  if(S.mode === "live"){
+    // 即時漸進：走過的路徑
+    const played = [];
+    for(const n of S.notes){ if(n.time <= S.nowMs) played.push(n); else break; }
+    ctx.lineWidth = 1.8; ctx.strokeStyle = color;
+    ctx.globalAlpha = .8; ctx.shadowColor = color; ctx.shadowBlur = 8;
+    let prevSlot = null;
+    for(const n of played){
+      const pc = ((n.pitch%12)+12)%12;
+      const slot = order.indexOf(pc);
+      if(slot < 0) continue;
+      if(prevSlot !== null && prevSlot !== slot){
+        const [x1,y1] = nodePos(cx,cy,r,prevSlot);
+        const [x2,y2] = nodePos(cx,cy,r,slot);
+        // 二次貝茲，曲線往圓心收斂
+        const mx = cx + ((x1 + x2)/2 - cx) * 0.55;
+        const my = cy + ((y1 + y2)/2 - cy) * 0.55;
+        ctx.beginPath(); ctx.moveTo(x1,y1);
+        ctx.quadraticCurveTo(mx, my, x2, y2);
+        ctx.stroke();
+      }
+      prevSlot = slot;
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  } else {
+    // 全曲過渡矩陣：全曲統計，線寬依次數加權
+    const { m, max } = buildTransition(S.notes);
+    for(let a = 0; a < 12; a++){
+      for(let b = 0; b < 12; b++){
+        if(!m[a][b]) continue;
+        const sa = order.indexOf(a), sb = order.indexOf(b);
+        if(sa < 0 || sb < 0) continue;
+        const [x1,y1] = nodePos(cx,cy,r,sa);
+        const [x2,y2] = nodePos(cx,cy,r,sb);
+        const w = 0.6 + 3.6 * (m[a][b] / max);
+        const alpha = 0.18 + 0.72 * (m[a][b] / max);
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = w;
+        ctx.strokeStyle = color;
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // 標題
+  ctx.fillStyle = "#8fa3c8";
+  ctx.font = "13px system-ui"; ctx.textAlign = "center";
+  ctx.fillText(title, cx, cy + r + 58);
+  ctx.restore();
+}
+
+function drawAll(){
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  // 左右兩盤
+  drawDisc(265, 255, 140, CHROMATIC,        "#00dcff", "12 平均律連續音階");
+  drawDisc(735, 255, 140, CIRCLE_OF_FIFTHS, "#ff3fa4", "五度圈音階");
+
+  // 中央資訊
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#cfe3ff"; ctx.font = "bold 15px system-ui";
+  ctx.fillText(S.name || "—", 500, 80);
+  const p = currentPitch();
+  ctx.fillStyle = p >= 0 ? "#00dcff" : "#5a6884";
+  ctx.font = "bold 34px ui-monospace,monospace";
+  ctx.fillText(p >= 0 ? `${NOTE_NAMES[((p%12)+12)%12]}${Math.floor(p/12)-1}` : "--", 500, 126);
+  ctx.fillStyle = "#6d7b9c"; ctx.font = "12px system-ui";
+  ctx.fillText(S.mode === "live" ? "即時漸進模式" : "全曲過渡矩陣模式", 500, 152);
+  ctx.restore();
+
+  // 進度條
+  const barX = 90, barY = 540, barW = 820, barH = 10;
+  ctx.fillStyle = "#1b2338";
+  ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 5); ctx.fill();
+  const ratio = S.totalMs ? Math.min(S.nowMs / S.totalMs, 1) : 0;
+  const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+  grad.addColorStop(0, "#00dcff"); grad.addColorStop(1, "#ff3fa4");
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.roundRect(barX, barY, Math.max(barW*ratio, 0.1), barH, 5); ctx.fill();
+
+  ctx.fillStyle = "#8fa3c8"; ctx.font = "11px ui-monospace,monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(`${(S.nowMs/1000).toFixed(2)}s / ${(S.totalMs/1000).toFixed(2)}s`, barX + barW, barY - 6);
+}
+
+/* =========================================================
+   6. 主循環
+   ========================================================= */
+function frame(t){
+  const dt = S.lastFrame ? (t - S.lastFrame) : 16;
+  S.lastFrame = t;
+
+  if(S.playing){
+    const prev = S.nowMs;
+    S.nowMs += dt;
+
+    // 觸發音符聲音
+    S.notes.forEach((n, i) => {
+      if(!S.sparked.has(i) && n.time <= S.nowMs && n.time >= prev - dt - 2){
+        beep(n.pitch, n.dur);
+        S.sparked.add(i);
+      }
+    });
+
+    if(S.nowMs >= S.totalMs){
+      if(S.loop){
+        S.nowMs = 0; S.sparked.clear();
+        broadcast({ type:"seek", ms:0, loop:true });
+      } else {
+        S.nowMs = S.totalMs; pause();
+      }
+    }
+  }
+
+  drawAll();
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+   7. WebSocket 廣播（給 Arduino 模擬器用；沒有 server 也不影響本機播放）
+   ========================================================= */
+function connectWS(url){
+  if(!url) return;
+  try{
+    S.ws = new WebSocket(url);
+    S.ws.onopen = () => { setWsStat("WS 已連線 → " + url); };
+    S.ws.onclose = () => { setWsStat("WS 連線關閉（本機播放不受影響）"); S.ws = null; };
+    S.ws.onerror = () => { setWsStat("WS 連線失敗（可忽略，本機模式可用）"); };
+  }catch(e){ setWsStat("WS 初始化失敗：" + e.message); }
+}
+function setWsStat(msg){ document.getElementById("wsStat").textContent = msg; }
+function broadcast(obj){
+  if(S.wsOn && S.ws && S.ws.readyState === 1){
+    S.ws.send(JSON.stringify(obj));
+  }
+}
+
+/* 每 50ms 送當前位置給 Arduino（模擬器不解析 MIDI，只吃這個） */
+setInterval(() => {
+  if(S.ws && S.ws.readyState === 1){
+    const p = currentPitch();
+    broadcast({ type:"state", ms: Math.round(S.nowMs), pitch: p,
+                pc: p>=0 ? ((p%12)+12)%12 : -1, playing: S.playing });
+  }
+}, 50);
+
+/* =========================================================
+   8. UI 綁定
+   ========================================================= */
+document.getElementById("btnPlay").onclick = () => { S.playing ? pause() : play(); };
+document.getElementById("btnLoop").onclick = (e) => {
+  S.loop = !S.loop;
+  e.target.textContent = "🔁 循環：" + (S.loop ? "開" : "關");
+  e.target.classList.toggle("on", S.loop);
+};
+document.getElementById("btnReset").onclick = () => reset();
+document.getElementById("btnWs").onclick = (e) => {
+  S.wsOn = !S.wsOn;
+  e.target.textContent = "🔌 WS 廣播：" + (S.wsOn ? "開" : "關");
+  e.target.classList.toggle("on", S.wsOn);
+};
+document.querySelectorAll(".mode").forEach(b => {
+  b.onclick = () => {
+    S.mode = b.dataset.mode;
+    document.querySelectorAll(".mode").forEach(x => x.classList.toggle("on", x === b));
+  };
+});
+document.querySelectorAll(".song").forEach(b => {
+  b.onclick = () => {
+    const s = BUILTIN[+b.dataset.song];
+    loadNotes(s.notes, s.name);
+  };
+});
+document.getElementById("file").onchange = async (e) => {
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const buf = await f.arrayBuffer();
+    const res = parseMidi(buf);
+    loadNotes(res.notes, f.name + ` [fmt${res.format}/${res.tracks}trk]`);
+  }catch(err){
+    document.getElementById("status").textContent = "解析失敗：" + err.message;
+  }
+};
+
+/* 鍵盤：Space 播放/暫停、L 循環、R 重播、1/2 模式 */
+window.addEventListener("keydown", ev => {
+  if(ev.code === "Space"){ ev.preventDefault(); S.playing ? pause() : play(); }
+  if(ev.key === "l" || ev.key === "L") document.getElementById("btnLoop").click();
+  if(ev.key === "r" || ev.key === "R") reset();
+  if(ev.key === "1") document.querySelector('[data-mode="live"]').click();
+  if(ev.key === "2") document.querySelector('[data-mode="overview"]').click();
+});
+
+/* 啟動 */
+loadNotes(BUILTIN[0].notes, BUILTIN[0].name);
+requestAnimationFrame(frame);
+// 若你有本地 WS server，取消下一行註解並填入網址
+// connectWS("ws://localhost:8080");
+</script>
+</body>
+</html>

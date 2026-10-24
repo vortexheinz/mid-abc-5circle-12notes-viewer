@@ -1,0 +1,981 @@
+﻿<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>MIDI / ABC 音階圓盤示波器</title>
+<style>
+  :root{--bg:#0f1220;--panel:#171b2e;--line:#2c3554;--cyan:#00dcff;--pink:#ff3fa4;}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:#e8ecf5;
+    font-family:"Noto Sans TC",system-ui,sans-serif}
+  body{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px}
+  h1{font-size:17px;letter-spacing:1px;margin:0;color:#b9c7e6;font-weight:600}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center}
+  button,label.file{
+    background:var(--panel);color:#cfe3ff;border:1px solid var(--line);
+    padding:7px 13px;border-radius:8px;font-size:13px;cursor:pointer;transition:.15s}
+  button:hover,label.file:hover{border-color:var(--cyan);color:#fff}
+  button.on{background:#0b3d4a;border-color:var(--cyan);color:var(--cyan)}
+  label.file input{display:none}
+  canvas{background:#11162a;border:1px solid #232b45;border-radius:14px;max-width:100%}
+  .tag{font-size:12px;color:#6d7b9c;margin-right:2px}
+  #status{font-size:12px;color:#8fa3c8;min-height:16px;text-align:center;max-width:980px}
+  #wsStat{font-size:11px;color:#5a6884}
+  .modal{display:none;position:fixed;inset:0;background:#000b;z-index:99;
+    align-items:center;justify-content:center;padding:20px}
+  .modal.show{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:16px;width:min(900px,96vw);max-height:86vh;
+    display:flex;flex-direction:column;gap:10px}
+  .modal textarea{flex:1;min-height:340px;background:#0d1120;color:#cfe3ff;
+    border:1px solid var(--line);border-radius:8px;padding:12px;
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5;
+    resize:vertical;white-space:pre}
+  .row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+  .small{font-size:11px;color:#5a6884}
+</style>
+</head>
+<body>
+<h1>MIDI / ABC 音階圓盤示波器</h1>
+
+<div class="bar">
+  <label class="file">📂 載入 MIDI<input type="file" id="fileMidi" accept=".mid,.midi"></label>
+  <label class="file">🎼 載入 ABC<input type="file" id="fileAbc" accept=".abc,.txt"></label>
+  <button id="btnPasteAbc">📝 貼上 ABC</button>
+  <button id="btnExport">💾 匯出 BUILTIN</button>
+</div>
+
+<div class="bar">
+  <button id="btnPlay">▶ 播放</button>
+  <button id="btnLoop" class="on">🔁 循環：開</button>
+  <button id="btnReset">⟲ 回到開頭</button>
+</div>
+
+<div class="bar" id="songBar">
+  <span class="tag">內建曲：</span>
+</div>
+
+<div class="bar">
+  <span class="tag">顯示模式：</span>
+  <button class="mode on" data-mode="live">即時漸進</button>
+  <button class="mode" data-mode="overview">全曲過渡矩陣</button>
+  <button id="btnWs" class="on">🔌 WS 廣播：開</button>
+</div>
+
+<canvas id="cv" width="1000" height="600"></canvas>
+<div id="status">尚未載入</div>
+<div id="wsStat"></div>
+
+<!-- 匯出面板 -->
+<div class="modal" id="exportPanel">
+  <div class="box">
+    <div class="row" style="justify-content:space-between">
+      <b style="color:var(--cyan)">匯出（可直接貼回 BUILTIN）</b>
+      <span class="small" id="exportInfo"></span>
+    </div>
+    <div class="row" style="justify-content:flex-start">
+      <button class="exp" data-kind="builtin" data-on="1">BUILTIN 陣列項目</button>
+      <button class="exp" data-kind="block">整段 BUILTIN</button>
+      <button class="exp" data-kind="json">JSON</button>
+    </div>
+    <textarea id="exportText" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="btnCopy">📋 複製</button>
+      <button id="btnDownload">⬇ 下載</button>
+      <button id="btnCloseExport">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- ABC 貼上面板 -->
+<div class="modal" id="abcPanel">
+  <div class="box">
+    <div class="row" style="justify-content:space-between">
+      <b style="color:var(--pink)">貼上 ABC 曲譜</b>
+      <span class="small">支援 X/T/M/L/Q/K/V、升降記號、和弦、反覆</span>
+    </div>
+    <textarea id="abcText" spellcheck="false" placeholder="X:1
+T:小星星
+M:4/4
+L:1/4
+Q:1/4=100
+K:C
+C C G G | A A G2 | F F E E | D D C2 |"></textarea>
+    <div class="row">
+      <button id="btnParseAbc">解析並載入</button>
+      <button id="btnCloseAbc">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   0. 常數
+   ========================================================= */
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const CIRCLE_OF_FIFTHS = [0,7,2,9,4,11,6,1,8,3,10,5];
+const CHROMATIC = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+/* =========================================================
+   1. 內建曲（mkNoteList：[[pitch,dur],...] + gap）
+   ========================================================= */
+function mkNoteList(pairs, gap){
+  let t = 0, out = [];
+  for(const [pitch, dur] of pairs){
+    out.push({ pitch, time: t, dur });
+    t += dur + (gap || 0);
+  }
+  return out;
+}
+
+const BUILTIN = [
+  { name:"搖籃曲 (Lakota 風)", notes: mkNoteList(
+      [[69,600],[67,300],[64,600],[67,300],[69,600],[72,900],
+       [69,300],[67,300],[64,900],[62,300],[64,300],[67,900],
+       [69,300],[67,300],[64,1200]], 380) },
+  { name:"小星星", notes: mkNoteList(
+      [[60,400],[60,400],[67,400],[67,400],[69,400],[69,400],[67,800],
+       [65,400],[65,400],[64,400],[64,400],[62,400],[62,400],[60,800]], 180) },
+  { name:"五聲音階練習", notes: mkNoteList(
+      [[60,250],[62,250],[64,250],[67,250],[69,250],[72,250],
+       [69,250],[67,250],[64,250],[62,250],[60,500],
+       [67,250],[72,250],[76,500]], 300) }
+];
+
+/* =========================================================
+   2. MIDI 解析（SMF：MThd/MTrk/VLQ/running status/tempo map）
+   ========================================================= */
+function parseMidi(arrayBuffer){
+  const d = new DataView(arrayBuffer);
+  let p = 0;
+  const u8   = () => d.getUint8(p++);
+  const u16  = () => { const v = d.getUint16(p); p += 2; return v; };
+  const u32  = () => { const v = d.getUint32(p); p += 4; return v; };
+  const str4 = () => { const s = String.fromCharCode(d.getUint8(p),d.getUint8(p+1),
+                            d.getUint8(p+2),d.getUint8(p+3)); p += 4; return s; };
+  const vlq  = () => { let v = 0, b; do{ b = d.getUint8(p++); v = (v<<7)|(b&0x7f); }while(b&0x80); return v; };
+
+  if(str4() !== "MThd") throw new Error("不是標準 MIDI 檔（缺少 MThd）");
+  u32();
+  const fmt = u16(), ntrk = u16();
+  const division = u16();
+  if(division & 0x8000) throw new Error("SMPTE 時間格式尚未支援");
+
+  const tempoEvents = [{ tick:0, usPQ:500000 }];
+  const rawNotes = [];
+  const open = {};
+
+  for(let t = 0; t < ntrk && p + 8 <= arrayBuffer.byteLength; t++){
+    if(str4() !== "MTrk") break;
+    const len = u32(); const end = p + len;
+    let tick = 0, runningStatus = 0;
+
+    while(p < end){
+      tick += vlq();
+      let st = d.getUint8(p);
+      if(st < 0x80){ st = runningStatus; }
+      else { p++; runningStatus = st; }
+      const type = st & 0xF0;
+
+      if(st === 0xFF){
+        const mt = u8(), ml = vlq(), ms = p;
+        if(mt === 0x51 && ml === 3){
+          tempoEvents.push({ tick,
+            usPQ: (d.getUint8(ms)<<16)|(d.getUint8(ms+1)<<8)|d.getUint8(ms+2) });
+        }
+        if(mt === 0x2F && ml === 0){ p = end; break; }
+        p += ml;
+      }
+      else if(st === 0xF0 || st === 0xF7){ const sl = vlq(); p += sl; }
+      else if(type === 0x90 || type === 0x80){
+        const key = d.getUint8(p), vel = d.getUint8(p+1); p += 2;
+        const k = t + "_" + key;
+        if(type === 0x90 && vel > 0){
+          if(open[k] === undefined) open[k] = tick;
+        } else if(open[k] !== undefined){
+          rawNotes.push({ tick: open[k], pitch: key,
+                          durTicks: Math.max(tick - open[k], 1) });
+          delete open[k];
+        }
+      }
+      else if(type === 0xA0 || type === 0xB0 || type === 0xE0){ p += 2; }
+      else if(type === 0xC0 || type === 0xD0){ p += 1; }
+      else { p += 1; }
+    }
+    p = end;
+  }
+
+  tempoEvents.sort((a,b) => a.tick - b.tick);
+  function tickToMs(tk){
+    let ms = 0, prevTick = 0, usPQ = tempoEvents[0].usPQ;
+    for(const te of tempoEvents){
+      if(te.tick >= tk) break;
+      ms += (te.tick - prevTick) * (usPQ/1000) / division;
+      prevTick = te.tick; usPQ = te.usPQ;
+    }
+    ms += (tk - prevTick) * (usPQ/1000) / division;
+    return ms;
+  }
+
+  const notes = rawNotes
+    .map(n => ({ pitch: n.pitch,
+                 time:  tickToMs(n.tick),
+                 dur:   tickToMs(n.tick + n.durTicks) - tickToMs(n.tick) }))
+    .sort((a,b) => a.time - b.time);
+
+  if(!notes.length) throw new Error("檔案內沒有 Note-On 事件");
+  return { notes, division, format: fmt, tracks: ntrk };
+}
+
+/* =========================================================
+   3. ABC 解析器
+   ========================================================= */
+const ACC_TO_SEMI = { "C":0,"D":2,"E":4,"F":5,"G":7,"A":9,"B":11 };
+const KEY_SIGNATURE = {
+  "C":{}, "Am":{},
+  "G":{"F":1}, "Em":{"F":1},
+  "D":{"F":1,"C":1}, "Bm":{"F":1,"C":1},
+  "A":{"F":1,"C":1,"G":1}, "F#m":{"F":1,"C":1,"G":1},
+  "E":{"F":1,"C":1,"G":1,"D":1}, "C#m":{"F":1,"C":1,"G":1,"D":1},
+  "B":{"F":1,"C":1,"G":1,"D":1,"A":1}, "G#m":{"F":1,"C":1,"G":1,"D":1,"A":1},
+  "F":{"B":-1}, "Dm":{"B":-1},
+  "Bb":{"B":-1,"E":-1}, "Gm":{"B":-1,"E":-1},
+  "Eb":{"B":-1,"E":-1,"A":-1}, "Cm":{"B":-1,"E":-1,"A":-1},
+  "Ab":{"B":-1,"E":-1,"A":-1,"D":-1}, "Fm":{"B":-1,"E":-1,"A":-1,"D":-1},
+  "Db":{"B":-1,"E":-1,"A":-1,"D":-1,"G":-1}, "Bbm":{"B":-1,"E":-1,"A":-1,"D":-1,"G":-1}
+};
+
+function parseAbc(text){
+  const lines = text.replace(/\r/g,"").split("\n").map(l => {
+    const i = l.indexOf("%"); return i >= 0 ? l.slice(0, i) : l;
+  });
+
+  const header = { X:null, T:"", M:"4/4", L:"1/8", Q:null, K:"C" };
+  const bodyLines = [];
+  const voiceBodies = {};
+  let curVoice = null, inBody = false;
+
+  for(const raw of lines){
+    const line = raw.trim();
+    if(!line){ if(inBody) bodyLines.push(""); continue; }
+    const m = line.match(/^([A-Za-z]):\s?(.*)$/);
+    if(m){
+      const key = m[1].toUpperCase(), val = m[2].trim();
+      if(key === "T" && !header.T) header.T = val;
+      else if(key === "M") header.M = val;
+      else if(key === "L") header.L = val;
+      else if(key === "Q") header.Q = val;
+      else if(key === "K"){ header.K = val.split(/\s/)[0]; inBody = true; }
+      else if(key === "X") header.X = val;
+      else if(key === "V"){
+        curVoice = val.split(/\s/)[0] || "1";
+        if(!voiceBodies[curVoice]) voiceBodies[curVoice] = "";
+      }
+      continue;
+    }
+    if(inBody){
+      if(curVoice !== null) voiceBodies[curVoice] += line + "\n";
+      else bodyLines.push(line);
+    }
+  }
+
+  function frac(str){
+    if(!str) return null;
+    const m = str.match(/^(\d+)\s*\/\s*(\d+)$/);
+    if(m) return parseInt(m[1]) / parseInt(m[2]);
+    if(/^\d+$/.test(str)) return parseInt(str);
+    return null;
+  }
+  const L = frac(header.L) || 0.125;
+
+  let bpm = 120, qUnit = 0.25;
+  if(header.Q){
+    const qm = header.Q.match(/^(\d+)\s*\/\s*(\d+)\s*=\s*(\d+)/);
+    if(qm){ qUnit = parseInt(qm[1])/parseInt(qm[2]); bpm = parseInt(qm[3]); }
+    else {
+      const simple = header.Q.match(/^(\d+)/);
+      if(simple) bpm = parseInt(simple[1]);
+    }
+  }
+  const msPerWhole = (60000 / bpm) / qUnit;
+  const keyAcc = KEY_SIGNATURE[header.K] || {};
+
+  const allBodies = Object.keys(voiceBodies).length
+      ? Object.values(voiceBodies) : [ bodyLines.join("\n") ];
+
+  let allNotes = [];
+
+  const expandRepeats = body => {
+    let out = "", repeatStart = -1, i = 0;
+    while(i < body.length){
+      if(body.startsWith("|:", i)){ repeatStart = out.length; i += 2; continue; }
+      if(body.startsWith(":|", i)){
+        if(repeatStart >= 0){ out += body.slice(repeatStart); repeatStart = -1; }
+        i += 2; continue;
+      }
+      if(body.startsWith("[1", i) || body.startsWith("[2", i)){ i += 2; continue; }
+      out += body[i++];
+    }
+    return out;
+  };
+
+  function parseAbcPitches(str){
+    const out = [];
+    let i = 0;
+    while(i < str.length){
+      let accidental = 0;
+      while(i < str.length && (str[i] === "^" || str[i] === "_" || str[i] === "=")){
+        if(str[i] === "^") accidental += 1;
+        if(str[i] === "_") accidental -= 1;
+        if(str[i] === "=") accidental = 0;
+        i++;
+      }
+      const letter = str[i];
+      if(!letter || !/[A-Ga-g]/.test(letter)){ i++; continue; }
+      i++;
+      let oct = 0;
+      while(i < str.length && (str[i] === "'" || str[i] === ",")){
+        oct += str[i] === "'" ? 1 : -1; i++;
+      }
+      while(i < str.length && /[\d/]/.test(str[i])) i++;
+      const isUpper = letter === letter.toUpperCase();
+      const base = ACC_TO_SEMI[letter.toUpperCase()];
+      let pitch = 60 + base + (isUpper ? 0 : 12) + oct*12;
+      pitch += accidental !== 0 ? accidental : (keyAcc[letter.toUpperCase()] || 0);
+      if(pitch >= 0 && pitch <= 127) out.push(pitch);
+    }
+    return out;
+  }
+
+  for(const rawBody of allBodies){
+    const body = expandRepeats(rawBody);
+    let t = 0, i = 0;
+    const n = body.length;
+
+    const readNumber = (pos) => {
+      let num = "", den = "", j = pos;
+      while(j < n && /\d/.test(body[j])) num += body[j++];
+      if(body[j] === "/"){
+        j++;
+        while(j < n && /\d/.test(body[j])) den += body[j++];
+        return { num: num ? parseInt(num) : 1, den: den ? parseInt(den) : 2, end: j };
+      }
+      return { num: num ? parseInt(num) : 1, den: null, end: j };
+    };
+
+    while(i < n){
+      const c = body[i];
+
+      if(/[\s|\]\[]/.test(c)){ i++; continue; }
+      if(c === "%"){ while(i < n && body[i] !== "\n") i++; continue; }
+
+      if(c === "z" || c === "Z" || c === "x"){
+        i++;
+        const { num, den } = readNumber(i);
+        const fracVal = (den === null) ? L*num : L*(num/den);
+        t += fracVal * msPerWhole;
+        while(i < n && /[\d/]/.test(body[i])) i++;
+        continue;
+      }
+
+      if(c === "["){
+        const endIdx = body.indexOf("]", i + 1);
+        if(endIdx < 0){ i++; continue; }
+        const inner = body.slice(i + 1, endIdx);
+        i = endIdx + 1;
+        const { num, den } = readNumber(i);
+        const fracVal = (den === null) ? L*num : L*(num/den);
+        while(i < n && /[\d/]/.test(body[i])) i++;
+        for(const pitch of parseAbcPitches(inner)){
+          allNotes.push({ pitch, time: t, dur: fracVal * msPerWhole });
+        }
+        t += fracVal * msPerWhole;
+        continue;
+      }
+
+      let accidental = 0, j = i;
+      while(j < n && (body[j] === "^" || body[j] === "_" || body[j] === "=")){
+        if(body[j] === "^") accidental += 1;
+        if(body[j] === "_") accidental -= 1;
+        if(body[j] === "=") accidental = 0;
+        j++;
+      }
+      const letter = body[j];
+      if(letter && /[A-Ga-g]/.test(letter)){
+        i = j + 1;
+        let octaveShift = 0;
+        while(i < n && (body[i] === "'" || body[i] === ",")){
+          octaveShift += body[i] === "'" ? 1 : -1; i++;
+        }
+        const { num, den } = readNumber(i);
+        const fracVal = (den === null) ? L*num : L*(num/den);
+        while(i < n && /[\d/]/.test(body[i])) i++;
+
+        const isUpper = letter === letter.toUpperCase();
+        const base = ACC_TO_SEMI[letter.toUpperCase()];
+        let pitch = 60 + base + (isUpper ? 0 : 12) + octaveShift*12;
+        pitch += accidental !== 0 ? accidental : (keyAcc[letter.toUpperCase()] || 0);
+
+        if(pitch >= 0 && pitch <= 127){
+          allNotes.push({ pitch, time: t, dur: fracVal * msPerWhole });
+        }
+        t += fracVal * msPerWhole;
+        continue;
+      }
+      i++;
+    }
+  }
+
+  allNotes.sort((a,b) => a.time - b.time || a.pitch - b.pitch);
+  const cleaned = [];
+  const seen = new Set();
+  for(const nt of allNotes){
+    const k = nt.pitch + "@" + Math.round(nt.time);
+    if(seen.has(k)) continue;
+    seen.add(k); cleaned.push(nt);
+  }
+  if(!cleaned.length) throw new Error("ABC 內容沒有解析到任何音符");
+  return { notes: cleaned, header };
+}
+
+/* =========================================================
+   4. 狀態
+   ========================================================= */
+const S = {
+  notes: [], name: "", totalMs: 0,
+  playing: false, loop: true, mode: "live",
+  nowMs: 0, lastFrame: 0, sparked: new Set(),
+  audioCtx: null, wsOn: true, ws: null,
+  lastLoadedIndex: -1
+};
+
+function buildTransition(notes){
+  const m = Array.from({length:12}, () => new Array(12).fill(0));
+  let prev = -1, max = 1;
+  for(const nt of notes){
+    const cur = ((nt.pitch % 12) + 12) % 12;
+    if(prev >= 0 && prev !== cur){
+      m[prev][cur]++;
+      if(m[prev][cur] > max) max = m[prev][cur];
+    }
+    prev = cur;
+  }
+  return { m, max };
+}
+
+function computeTotal(notes){
+  let e = 0;
+  for(const nt of notes) e = Math.max(e, nt.time + Math.max(nt.dur, 80));
+  return e + 500;
+}
+
+function loadNotes(notes, name){
+  S.notes = notes;
+  S.name = name;
+  S.totalMs = computeTotal(notes);
+  S.nowMs = 0;
+  S.playing = false;
+  S.sparked.clear();
+  const bp = document.getElementById("btnPlay");
+  bp.textContent = "▶ 播放"; bp.classList.remove("on");
+
+  const minP = Math.min(...notes.map(n => n.pitch));
+  const maxP = Math.max(...notes.map(n => n.pitch));
+  document.getElementById("status").textContent =
+    `${name} — ${notes.length} 音符，總長 ${(S.totalMs/1000).toFixed(1)} 秒，` +
+    `音域 ${NOTE_NAMES[((minP%12)+12)%12]}${Math.floor(minP/12)-1} ~ ` +
+    `${NOTE_NAMES[((maxP%12)+12)%12]}${Math.floor(maxP/12)-1}`;
+
+  broadcast({ type:"song", name, notes });
+}
+
+/* =========================================================
+   5. 播放
+   ========================================================= */
+function ensureAudio(){
+  if(!S.audioCtx) S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(S.audioCtx.state === "suspended") S.audioCtx.resume();
+}
+
+function beep(midi, durMs){
+  if(!S.audioCtx) return;
+  const f = 440 * Math.pow(2, (midi - 69)/12);
+  const t0 = S.audioCtx.currentTime;
+  const dur = Math.min(Math.max(durMs/1000, .08), 1.5);
+  const osc = S.audioCtx.createOscillator();
+  const gain = S.audioCtx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = f;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(0.16, t0 + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+  osc.connect(gain).connect(S.audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.05);
+}
+
+function play(){
+  if(!S.notes.length) return;
+  ensureAudio();
+  S.playing = true;
+  S.lastFrame = performance.now();
+  S.sparked.clear();
+  const bp = document.getElementById("btnPlay");
+  bp.textContent = "⏸ 暫停"; bp.classList.add("on");
+}
+function pause(){
+  S.playing = false;
+  const bp = document.getElementById("btnPlay");
+  bp.textContent = "▶ 播放"; bp.classList.remove("on");
+}
+function reset(){
+  pause(); S.nowMs = 0; S.sparked.clear();
+  broadcast({ type:"seek", ms:0 });
+}
+
+/* =========================================================
+   6. 繪圖
+   ========================================================= */
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+function nodePos(cx, cy, r, slot){
+  const a = -Math.PI/2 + (Math.PI*2) * (slot/12);
+  return [cx + Math.cos(a)*r, cy + Math.sin(a)*r];
+}
+function currentPitch(){
+  let p = -1;
+  for(const nt of S.notes){ if(nt.time <= S.nowMs) p = nt.pitch; else break; }
+  return p;
+}
+
+function drawDisc(cx, cy, r, order, color, title){
+  const p = currentPitch();
+  const cur = p >= 0 ? ((p%12)+12)%12 : -1;
+
+  ctx.save();
+  ctx.strokeStyle = "#28324f"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 30, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = "#1d2540";
+  ctx.beginPath(); ctx.arc(cx, cy, r - 36, 0, Math.PI*2); ctx.stroke();
+
+  for(let slot = 0; slot < 12; slot++){
+    const pc = order[slot];
+    const [x, y] = nodePos(cx, cy, r, slot);
+    const active = S.playing && cur === pc;
+    ctx.beginPath();
+    ctx.arc(x, y, active ? 17 : 13, 0, Math.PI*2);
+    ctx.fillStyle = active ? color : "#1b2338";
+    ctx.fill();
+    ctx.strokeStyle = active ? "#ffffff" : color;
+    ctx.lineWidth = 2;
+    if(active){ ctx.shadowColor = color; ctx.shadowBlur = 18; }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = active ? "#06101a" : "#9fb2d4";
+    ctx.font = "bold 11px system-ui";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(NOTE_NAMES[pc], x, y);
+  }
+
+  if(S.mode === "live"){
+    const played = [];
+    for(const nt of S.notes){ if(nt.time <= S.nowMs) played.push(nt); else break; }
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = .8;
+    ctx.shadowColor = color; ctx.shadowBlur = 8;
+    let prevSlot = null;
+    for(const nt of played){
+      const pc = ((nt.pitch % 12) + 12) % 12;
+      const slot = order.indexOf(pc);
+      if(slot < 0) continue;
+      if(prevSlot !== null && prevSlot !== slot){
+        const [x1,y1] = nodePos(cx, cy, r, prevSlot);
+        const [x2,y2] = nodePos(cx, cy, r, slot);
+        const mx = cx + ((x1 + x2)/2 - cx) * 0.55;
+        const my = cy + ((y1 + y2)/2 - cy) * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.quadraticCurveTo(mx, my, x2, y2);
+        ctx.stroke();
+      }
+      prevSlot = slot;
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  } else {
+    const { m, max } = buildTransition(S.notes);
+    for(let a = 0; a < 12; a++){
+      for(let b = 0; b < 12; b++){
+        if(!m[a][b] || a === b) continue;
+        const sa = order.indexOf(a), sb = order.indexOf(b);
+        if(sa < 0 || sb < 0) continue;
+        const [x1,y1] = nodePos(cx, cy, r, sa);
+        const [x2,y2] = nodePos(cx, cy, r, sb);
+        const weight = 1.2 + 3.3 * (m[a][b] / max);
+        const alpha  = 0.27 + 0.63 * (m[a][b] / max);
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = weight;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = "#8fa3c8";
+  ctx.font = "13px system-ui";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(title, cx, cy + r + 58);
+
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r){
+  ctx.beginPath();
+  if(ctx.roundRect){ ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+function drawAll(){
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  drawDisc(265, 255, 140, CHROMATIC,        "#00dcff", "12 平均律連續音階");
+  drawDisc(735, 255, 140, CIRCLE_OF_FIFTHS, "#ff3fa4", "五度圈音階");
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#cfe3ff";
+  ctx.font = "bold 15px system-ui";
+  ctx.fillText(S.name || "—", 500, 78);
+
+  const p = currentPitch();
+  ctx.fillStyle = p >= 0 ? "#00dcff" : "#5a6884";
+  ctx.font = "bold 34px ui-monospace,monospace";
+  ctx.fillText(
+    p >= 0 ? `${NOTE_NAMES[((p%12)+12)%12]}${Math.floor(p/12)-1}` : "--",
+    500, 126
+  );
+
+  ctx.fillStyle = "#6d7b9c";
+  ctx.font = "12px system-ui";
+  ctx.fillText(
+    S.mode === "live"
+      ? "即時漸進模式（線條隨播放逐步生成）"
+      : "全曲過渡矩陣模式（亮度/粗細代表過渡頻率）",
+    500, 154
+  );
+  ctx.restore();
+
+  const barX = 90, barY = 540, barW = 820, barH = 10;
+  ctx.fillStyle = "#1b2338";
+  roundRect(barX, barY, barW, barH, 5);
+  ctx.fill();
+
+
+  const ratio = S.totalMs ? Math.min(S.nowMs / S.totalMs, 1) : 0;
+  if(ratio > 0){
+    const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+    grad.addColorStop(0, "#00dcff");
+    grad.addColorStop(1, "#ff3fa4");
+    ctx.fillStyle = grad;
+    roundRect(barX, barY, Math.max(barW * ratio, 0.1), barH, 5);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#8fa3c8";
+  ctx.font = "11px ui-monospace,monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(
+    `${(S.nowMs/1000).toFixed(2)}s / ${(S.totalMs/1000).toFixed(2)}s`,
+    barX + barW, barY - 6
+  );
+}
+
+/* =========================================================
+   7. 主循環
+   ========================================================= */
+function frame(t){
+  const dt = S.lastFrame ? (t - S.lastFrame) : 16;
+  S.lastFrame = t;
+
+  if(S.playing && S.notes.length){
+    const prev = S.nowMs;
+    S.nowMs += dt;
+
+    S.notes.forEach((nt, i) => {
+      if(!S.sparked.has(i) && nt.time <= S.nowMs && nt.time >= prev - dt - 2){
+        beep(nt.pitch, nt.dur);
+        S.sparked.add(i);
+      }
+    });
+
+    if(S.nowMs >= S.totalMs){
+      if(S.loop){
+        S.nowMs = 0;
+        S.sparked.clear();
+        broadcast({ type:"seek", ms:0, loop:true });
+      } else {
+        S.nowMs = S.totalMs;
+        pause();
+      }
+    }
+  }
+
+  drawAll();
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+   8. WebSocket 廣播（無 server 也不影響本機播放）
+   ========================================================= */
+function setWsStat(msg){
+  document.getElementById("wsStat").textContent = msg;
+}
+function connectWS(url){
+  if(!url) return;
+  try{
+    S.ws = new WebSocket(url);
+    S.ws.onopen  = () => setWsStat("WS 已連線 → " + url);
+    S.ws.onclose = () => { setWsStat("WS 連線關閉（本機播放不受影響）"); S.ws = null; };
+    S.ws.onerror = () => setWsStat("WS 連線失敗（可忽略，本機模式可用）");
+  }catch(e){
+    setWsStat("WS 初始化失敗：" + e.message);
+  }
+}
+function broadcast(obj){
+  if(S.wsOn && S.ws && S.ws.readyState === 1){
+    S.ws.send(JSON.stringify(obj));
+  }
+}
+setInterval(() => {
+  if(S.ws && S.ws.readyState === 1){
+    const p = currentPitch();
+    broadcast({
+      type: "state",
+      ms: Math.round(S.nowMs),
+      pitch: p,
+      pc: p >= 0 ? ((p % 12) + 12) % 12 : -1,
+      playing: S.playing
+    });
+  }
+}, 50);
+
+/* =========================================================
+   9. 匯出：BUILTIN 中括號格式 / 整段 / JSON
+   ========================================================= */
+
+/* 單一項目：可直接貼進 BUILTIN 陣列 */
+function toBuiltinItem(){
+  const name = (S.name || "新曲").replace(/"/g, '\\"');
+  let lines = [];
+  let buf = "      ";
+  S.notes.forEach(nt => {
+    const item = `[${nt.pitch},${Math.round(nt.dur)}],`;
+    if(buf.length + item.length > 78){
+      lines.push(buf.replace(/,$/, ""));
+      buf = "      ";
+    }
+    buf += item;
+  });
+  if(buf.trim() !== "") lines.push(buf.replace(/,$/, ""));
+
+  return `  { name:"${name}", notes: mkNoteList(\n` +
+         `      [\n${lines.join(",\n")}\n      ], 0) }`;
+}
+
+/* 整段：const BUILTIN = [ ... ]; */
+function toBuiltinBlock(){
+  return `const BUILTIN = [\n${toBuiltinItem()}\n];`;
+}
+
+/* JSON：保留完整 time 資訊，供精準重建 */
+function toJsonPayload(){
+  return {
+    name: S.name,
+    totalMs: Math.round(S.totalMs),
+    count: S.notes.length,
+    notes: S.notes.map(nt => ({
+      pitch: nt.pitch,
+      time:  Math.round(nt.time),
+      dur:   Math.round(nt.dur)
+    }))
+  };
+}
+
+const exportPanel = document.getElementById("exportPanel");
+const exportText  = document.getElementById("exportText");
+const exportInfo  = document.getElementById("exportInfo");
+let exportKind = "builtin";
+
+function renderExport(){
+  if(!S.notes.length){ exportText.value = "（尚未載入曲子）"; return; }
+  if(exportKind === "builtin")      exportText.value = toBuiltinItem();
+  else if(exportKind === "block")   exportText.value = toBuiltinBlock();
+  else                              exportText.value = JSON.stringify(toJsonPayload(), null, 2);
+
+  exportInfo.textContent =
+    `${S.notes.length} 音符 / ${(S.totalMs/1000).toFixed(2)} 秒`;
+}
+
+document.querySelectorAll(".exp").forEach(b => {
+  b.onclick = () => {
+    exportKind = b.dataset.kind;
+    document.querySelectorAll(".exp").forEach(x =>
+      x.classList.toggle("on", x === b));
+    renderExport();
+  };
+});
+
+document.getElementById("btnExport").onclick = () => {
+  if(!S.notes.length) return;
+  renderExport();
+  exportPanel.classList.add("show");
+  console.log("[EXPORT " + exportKind + "]\n" + exportText.value);
+};
+document.getElementById("btnCloseExport").onclick = () =>
+  exportPanel.classList.remove("show");
+
+document.getElementById("btnCopy").onclick = async () => {
+  const txt = exportText.value;
+  try{
+    await navigator.clipboard.writeText(txt);
+    flash(exportInfo, "已複製到剪貼簿");
+  }catch{
+    exportText.select();
+    document.execCommand("copy");
+    flash(exportInfo, "已複製（fallback）");
+  }
+};
+
+document.getElementById("btnDownload").onclick = () => {
+  const ext = exportKind === "json" ? "json" : "txt";
+  const blob = new Blob([exportText.value], { type:"text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (S.name || "song").replace(/\.[^.]+$/, "").replace(/[^\w\u4e00-\u9fff-]/g, "_")
+             + "." + ext;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function flash(el, msg){
+  const old = el.textContent;
+  el.textContent = msg;
+  setTimeout(() => { el.textContent = old; }, 1500);
+}
+
+/* =========================================================
+   10. ABC 貼上 / 檔案
+   ========================================================= */
+const abcPanel = document.getElementById("abcPanel");
+const abcText  = document.getElementById("abcText");
+
+document.getElementById("btnPasteAbc").onclick = () =>
+  abcPanel.classList.add("show");
+document.getElementById("btnCloseAbc").onclick = () =>
+  abcPanel.classList.remove("show");
+
+document.getElementById("btnParseAbc").onclick = () => {
+  try{
+    const res = parseAbc(abcText.value);
+    loadNotes(res.notes, res.header.T || "ABC 曲目");
+    abcPanel.classList.remove("show");
+  }catch(err){
+    document.getElementById("status").textContent = "ABC 解析失敗：" + err.message;
+  }
+};
+
+document.getElementById("fileAbc").onchange = async (e) => {
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const txt = await f.text();
+    const res = parseAbc(txt);
+    loadNotes(res.notes, res.header.T || f.name);
+  }catch(err){
+    document.getElementById("status").textContent = "ABC 解析失敗：" + err.message;
+  }
+};
+
+/* =========================================================
+   11. MIDI 檔案
+   ========================================================= */
+document.getElementById("fileMidi").onchange = async (e) => {
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const buf = await f.arrayBuffer();
+    const res = parseMidi(buf);
+    loadNotes(res.notes, f.name);
+  }catch(err){
+    document.getElementById("status").textContent = "MIDI 解析失敗：" + err.message;
+  }
+};
+
+/* =========================================================
+   12. 按鈕 / 快捷鍵
+   ========================================================= */
+document.getElementById("btnPlay").onclick  = () => S.playing ? pause() : play();
+document.getElementById("btnReset").onclick = () => reset();
+document.getElementById("btnLoop").onclick  = (e) => {
+  S.loop = !S.loop;
+  e.target.textContent = "🔁 循環：" + (S.loop ? "開" : "關");
+  e.target.classList.toggle("on", S.loop);
+};
+document.getElementById("btnWs").onclick = (e) => {
+  S.wsOn = !S.wsOn;
+  e.target.textContent = "🔌 WS 廣播：" + (S.wsOn ? "開" : "關");
+  e.target.classList.toggle("on", S.wsOn);
+};
+document.querySelectorAll(".mode").forEach(b => {
+  b.onclick = () => {
+    S.mode = b.dataset.mode;
+    document.querySelectorAll(".mode").forEach(x =>
+      x.classList.toggle("on", x === b));
+  };
+});
+
+/* 內建曲按鈕（依 BUILTIN 長度自動生成） */
+const songBar = document.getElementById("songBar");
+BUILTIN.forEach((s, i) => {
+  const btn = document.createElement("button");
+  btn.className = "song";
+  btn.dataset.song = i;
+  btn.textContent = (i + 1) + " " + s.name;
+  btn.onclick = () => {
+    S.lastLoadedIndex = i;
+    loadNotes(s.notes, s.name);
+  };
+  songBar.appendChild(btn);
+});
+
+/* 快捷鍵，對應 PDE 的 keyPressed()：1/2 切模式、Space/R 重播 [1] */
+window.addEventListener("keydown", ev => {
+  if(ev.target.tagName === "TEXTAREA" || ev.target.tagName === "INPUT") return;
+  if(ev.code === "Space"){ ev.preventDefault(); S.playing ? pause() : play(); }
+  if(ev.key === "l" || ev.key === "L") document.getElementById("btnLoop").click();
+  if(ev.key === "r" || ev.key === "R") reset();
+  if(ev.key === "e" || ev.key === "E") document.getElementById("btnExport").click();
+  if(ev.key === "1") document.querySelector('[data-mode="live"]').click();
+  if(ev.key === "2") document.querySelector('[data-mode="overview"]').click();
+});
+
+/* =========================================================
+   13. 啟動
+   ========================================================= */
+loadNotes(BUILTIN[0].notes, BUILTIN[0].name);
+requestAnimationFrame(frame);
+
+// 若有本地 WS server，取消註解並填網址
+// connectWS("ws://localhost:8080");
+</script>
+</body>
+</html>
