@@ -1,0 +1,2434 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>音律採譜 - 梅爾卡巴 & 梅塔特隆 3D 音階矩陣播放器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #05070e;
+      font-family: 'Inter', 'Noto Sans TC', sans-serif;
+      color: #f8fafc;
+      user-select: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+    .glass-panel {
+      background: rgba(9, 13, 26, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(245, 200, 76, 0.25);
+      box-shadow: 0 12px 38px rgba(0, 0, 0, 0.7), inset 0 0 20px rgba(56, 189, 248, 0.05);
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.45);
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(245, 200, 76, 0.45);
+      border-radius: 9999px;
+    }
+    input[type="range"].gold-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 5px;
+      background: rgba(30, 41, 59, 0.92);
+      border-radius: 9999px;
+      outline: none;
+      border: 1px solid rgba(245, 200, 76, 0.28);
+    }
+    input[type="range"].gold-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #fde047, #f59e0b);
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(245, 200, 76, 0.85);
+    }
+    .active-glow {
+      box-shadow: 0 0 16px rgba(245, 200, 76, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D 渲染畫布容器 -->
+  <div id="canvas-container"></div>
+
+  <!-- 頂部狀態與即時音律 HUD -->
+  <header class="fixed top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+    <div class="glass-panel rounded-2xl px-4 py-2.5 flex items-center gap-3 pointer-events-auto">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400/25 via-emerald-500/20 to-purple-500/25 border border-amber-400/50 flex items-center justify-center text-amber-300 font-bold text-lg shadow-inner">
+        ✡
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm sm:text-base font-bold tracking-wide bg-gradient-to-r from-amber-200 via-amber-400 to-cyan-300 bg-clip-text text-transparent">
+            音律採譜 · 梅爾卡巴 & 梅塔特隆 3D 音階矩陣
+          </h1>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono">
+            純升記號 #
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 hidden sm:block">
+          拖曳旋轉視角 · 滾輪縮放 · 點擊六角節點或梅塔特隆 12 頂點直接奏鳴
+        </p>
+      </div>
+    </div>
+
+    <!-- 即時發聲資訊 HUD -->
+    <div class="glass-panel rounded-2xl px-4 py-2 flex items-center gap-4 pointer-events-auto">
+      <div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">當前觸發音符</div>
+        <div id="hud-note" class="text-sm sm:text-base font-bold font-mono text-amber-300">待命 (C4)</div>
+      </div>
+      <div class="h-7 w-px bg-slate-700/70"></div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">物理頻率</div>
+        <div id="hud-freq" class="text-sm sm:text-base font-bold font-mono text-cyan-300">256.87 Hz</div>
+      </div>
+      <div class="h-7 w-px bg-slate-700/70 hidden md:block"></div>
+      <div class="hidden md:block">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">螺旋拓撲座標</div>
+        <div id="hud-coord" class="text-xs font-mono text-purple-300">第 1 環 · 節點 #1</div>
+      </div>
+      <button id="btn-toggle-panels" class="ml-1 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800/85 hover:bg-slate-700 text-amber-200 border border-amber-500/35 transition">
+        收合面板
+      </button>
+    </div>
+  </header>
+
+  <!-- 左側控制面板：六角螺旋矩陣、梅爾卡巴三軸手動控制、梅塔特隆立方體 -->
+  <aside id="left-panel" class="fixed top-20 bottom-24 left-3 w-72 sm:w-80 z-20 glass-panel rounded-2xl p-3.5 overflow-y-auto custom-scroll space-y-4 transition-all duration-300">
+    <!-- 1. 音律與六角螺旋矩陣 -->
+    <section class="space-y-2.5">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-amber-400"></span> 音律與六角螺旋矩陣 (168節點)
+      </h2>
+
+      <div class="bg-slate-900/75 p-2.5 rounded-xl border border-slate-700/60 space-y-2">
+        <!-- 基準頻率 A4 = 432 / 440 Hz -->
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-300">宇宙基準音高 (A4)</span>
+          <div class="flex rounded-lg overflow-hidden border border-amber-500/40">
+            <button id="btn-432" class="px-2.5 py-1 text-xs font-mono font-bold bg-amber-500/30 text-amber-200 transition">432 Hz</button>
+            <button id="btn-440" class="px-2.5 py-1 text-xs font-mono font-bold bg-slate-900 text-slate-400 hover:text-white transition">440 Hz</button>
+          </div>
+        </div>
+
+        <!-- 螺旋音程規則 -->
+        <div class="space-y-1">
+          <span class="text-[11px] text-slate-400">六角外擴音程規律</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button id="btn-spiral-chromatic" class="py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 transition">
+              半音階螺旋 (+1)
+            </button>
+            <button id="btn-spiral-fifths" class="py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition">
+              五度圈螺旋 (+7)
+            </button>
+          </div>
+        </div>
+
+        <!-- 起始根音 (純升記號) -->
+        <div class="flex items-center justify-between text-xs pt-1">
+          <span class="text-slate-300">中心軸起始根音</span>
+          <select id="select-root" class="bg-slate-950 border border-amber-500/40 rounded-lg px-2.5 py-1 text-xs font-mono text-amber-300 focus:outline-none">
+            <option value="0">C</option>
+            <option value="1">C#</option>
+            <option value="2">D</option>
+            <option value="3">D#</option>
+            <option value="4">E</option>
+            <option value="5">F</option>
+            <option value="6">F#</option>
+            <option value="7">G</option>
+            <option value="8">G#</option>
+            <option value="9">A</option>
+            <option value="10">A#</option>
+            <option value="11">B</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 3D 空間拓撲變形 -->
+      <div class="bg-slate-900/75 p-2.5 rounded-xl border border-slate-700/60 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-slate-300">六角星盤空間拓撲</span>
+          <span id="val-morph" class="text-[11px] font-mono text-cyan-300">100%</span>
+        </div>
+        <div class="grid grid-cols-3 gap-1">
+          <button data-topo="plane" class="topo-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-amber-500/30 text-amber-200 border border-amber-400/50 transition">
+            平面星盤
+          </button>
+          <button data-topo="cone" class="topo-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition">
+            雙極漏斗
+          </button>
+          <button data-topo="torus" class="topo-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition">
+            3D 環面
+          </button>
+        </div>
+        <input id="slider-morph" type="range" min="0" max="1" step="0.02" value="1" class="w-full gold-slider" />
+      </div>
+    </section>
+
+    <!-- 2. 梅爾卡巴 (Merkaba) 3D 雙四面體手動控制 -->
+    <section class="space-y-2.5 pt-1 border-t border-slate-700/60">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-purple-400"></span> 梅爾卡巴 3D 雙四面體
+        </h2>
+        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+          <input id="chk-merkaba-visible" type="checkbox" checked class="accent-amber-400 rounded" />
+          顯示場域
+        </label>
+      </div>
+
+      <div class="bg-slate-900/75 p-2.5 rounded-xl border border-purple-500/30 space-y-2.5">
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">梅爾卡巴縮放半徑</span>
+            <span id="val-merkaba-scale" class="font-mono text-amber-300">1.00x</span>
+          </div>
+          <input id="slider-merkaba-scale" type="range" min="0.45" max="2.1" step="0.05" value="1.0" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">水平方位角 (Y軸旋轉)</span>
+            <span id="val-merkaba-azimuth" class="font-mono text-amber-300">0°</span>
+          </div>
+          <input id="slider-merkaba-azimuth" type="range" min="0" max="360" step="1" value="0" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">俯仰傾角 (X軸傾斜)</span>
+            <span id="val-merkaba-elevation" class="font-mono text-amber-300">0°</span>
+          </div>
+          <input id="slider-merkaba-elevation" type="range" min="-90" max="90" step="1" value="0" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">陽陰四面體對轉相位角</span>
+            <span id="val-merkaba-twist" class="font-mono text-amber-300">0°</span>
+          </div>
+          <input id="slider-merkaba-twist" type="range" min="-180" max="180" step="1" value="0" class="w-full gold-slider" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-1.5 pt-0.5">
+          <button id="btn-merkaba-spin" class="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-600/60 transition">
+            ↻ 自動旋轉：關
+          </button>
+          <button id="btn-merkaba-reset" class="py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-amber-200 border border-amber-500/35 transition">
+            ⟲ 重置角度
+          </button>
+        </div>
+
+        <button id="btn-merkaba-arp" class="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500/30 via-purple-500/25 to-cyan-500/30 hover:from-amber-500/45 hover:to-cyan-500/45 text-white border border-amber-400/50 transition active-glow">
+          ✦ 奏鳴梅爾卡巴 8 頂點
+        </button>
+
+        <div class="space-y-1 pt-1">
+          <div class="text-[10px] text-slate-400 flex justify-between">
+            <span>陽性(金) / 陰性(紫) 頂點捕捉</span>
+            <span>純升記號</span>
+          </div>
+          <div id="merkaba-vertex-list" class="grid grid-cols-2 gap-1 text-[11px] font-mono"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 梅塔特隆立方體 (Metatron's Cube) 12 頂點音階矩陣 -->
+    <section class="space-y-2.5 pt-1 border-t border-slate-700/60">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span> 梅塔特隆立方體 12 頂點
+        </h2>
+        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+          <input id="chk-metatron-visible" type="checkbox" checked class="accent-emerald-400 rounded" />
+          顯示結構
+        </label>
+      </div>
+
+      <div class="bg-slate-900/75 p-2.5 rounded-xl border border-emerald-500/30 space-y-2.5">
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">梅塔特隆立體半徑</span>
+            <span id="val-metatron-scale" class="font-mono text-emerald-300">1.00x</span>
+          </div>
+          <input id="slider-metatron-scale" type="range" min="0.5" max="2.0" step="0.05" value="1.0" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">懸浮高度層級 (Y軸偏移)</span>
+            <span id="val-metatron-height" class="font-mono text-emerald-300">+3.8</span>
+          </div>
+          <input id="slider-metatron-height" type="range" min="0" max="8" step="0.2" value="3.8" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">梅塔特隆水平旋轉角</span>
+            <span id="val-metatron-rot" class="font-mono text-emerald-300">0°</span>
+          </div>
+          <input id="slider-metatron-rot" type="range" min="0" max="360" step="1" value="0" class="w-full gold-slider" />
+        </div>
+
+        <div class="flex items-center justify-between text-xs pt-0.5">
+          <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+            <input id="chk-metatron-wires" type="checkbox" checked class="accent-emerald-400 rounded" />
+            78條神聖幾何全連線
+          </label>
+          <button id="btn-metatron-arp" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-400/50 transition">
+            ✦ 奏鳴梅塔特隆 12 頂點
+          </button>
+        </div>
+
+        <div class="text-[10px] text-slate-400 leading-relaxed bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+          中心果實原點 + 內圈 6 頂點 + 外圈 6 頂點順勢排入 12 個純升記號音級（點擊頂點球體可直接奏鳴）。
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- 右側控制面板：雙軌跡獨立顯示開關與立體光管粗細控制 -->
+  <aside id="right-panel" class="fixed top-20 bottom-24 right-3 w-72 sm:w-80 z-20 glass-panel rounded-2xl p-3.5 overflow-y-auto custom-scroll space-y-4 transition-all duration-300">
+    <section class="space-y-2.5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-cyan-400"></span> 演奏幾何軌跡圖騰
+        </h2>
+        <button id="btn-clear-trail" class="text-[11px] px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-400/40 transition">
+          清除所有軌跡
+        </button>
+      </div>
+
+      <!-- 雙軌跡獨立開關控制 -->
+      <div class="bg-slate-900/90 p-2.5 rounded-xl border border-cyan-500/35 space-y-2">
+        <div class="text-[11px] font-semibold text-amber-200">獨立空間軌跡圖層開關</div>
+
+        <label class="flex items-center justify-between bg-slate-950/85 px-2.5 py-2 rounded-lg border border-amber-500/35 cursor-pointer text-xs">
+          <span class="flex items-center gap-2 text-slate-200">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></span>
+            顯示六角星盤軌跡
+          </span>
+          <input id="chk-hex-trail-visible" type="checkbox" checked class="accent-amber-400 w-4 h-4" />
+        </label>
+
+        <label class="flex items-center justify-between bg-slate-950/85 px-2.5 py-2 rounded-lg border border-emerald-500/35 cursor-pointer text-xs">
+          <span class="flex items-center gap-2 text-slate-200">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+            顯示梅塔特隆 12 頂點軌跡
+          </span>
+          <input id="chk-metatron-trail-visible" type="checkbox" checked class="accent-emerald-400 w-4 h-4" />
+        </label>
+      </div>
+
+      <!-- 軌跡保留模式、輝度與粗細 -->
+      <div class="bg-slate-900/80 p-2.5 rounded-xl border border-amber-500/30 space-y-2.5">
+        <div class="text-[11px] text-slate-300">軌跡保留模式</div>
+        <div class="grid grid-cols-2 gap-1.5 bg-slate-950/90 p-1 rounded-xl border border-slate-700/70">
+          <button id="btn-trail-persist" class="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-gradient-to-r from-amber-500/30 to-cyan-500/30 text-amber-200 border border-amber-400/50 transition">
+            保留整首軌跡
+          </button>
+          <button id="btn-trail-fade" class="py-1.5 px-2 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white transition">
+            即時消散
+          </button>
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">軌跡線條粗細 (立體光管管徑)</span>
+            <span id="val-trail-thickness" class="font-mono text-cyan-300">2.0x</span>
+          </div>
+          <input id="slider-trail-thickness" type="range" min="0.5" max="4.0" step="0.1" value="2.0" class="w-full gold-slider" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="text-slate-300">軌跡連線輝度</span>
+            <span id="val-trail-opacity" class="font-mono text-amber-300">88%</span>
+          </div>
+          <input id="slider-trail-opacity" type="range" min="15" max="100" step="5" value="88" class="w-full gold-slider" />
+        </div>
+
+        <div class="text-[10px] text-slate-400 leading-relaxed bg-slate-950/65 p-2 rounded-lg border border-slate-800 space-y-1">
+          <div><span class="text-amber-300 font-semibold">● 六角星盤光管：</span>金青漸層（旋律）／紫羅蘭（和弦）</div>
+          <div><span class="text-emerald-300 font-semibold">● 梅塔特隆光管：</span>翠綠至玫瑰金（空間跳躍／同音能量環）</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 顯示與共振設定 -->
+    <section class="space-y-2 pt-1 border-t border-slate-700/60">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-amber-400"></span> 視覺與泛音選項
+      </h2>
+
+      <label class="flex items-center justify-between bg-slate-900/75 px-3 py-2 rounded-xl border border-slate-700/60 cursor-pointer text-xs">
+        <span class="text-slate-300">同音名八度泛音共振發光</span>
+        <input id="chk-octave-res" type="checkbox" checked class="accent-cyan-400" />
+      </label>
+
+      <label class="flex items-center justify-between bg-slate-900/75 px-3 py-2 rounded-xl border border-slate-700/60 cursor-pointer text-xs">
+        <span class="text-slate-300">顯示六角形音階標籤 (#)</span>
+        <input id="chk-show-labels" type="checkbox" checked class="accent-amber-400" />
+      </label>
+
+      <button id="btn-reset-camera" class="w-full py-2 px-3 rounded-xl text-xs font-semibold bg-slate-800/85 hover:bg-slate-700 text-cyan-200 border border-cyan-500/30 transition">
+        重置 3D 攝影機俯瞰視角
+      </button>
+    </section>
+
+    <!-- 3. 即時採譜音符紀錄 -->
+    <section class="space-y-2 pt-1 border-t border-slate-700/60">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300">即時採譜序列紀錄</h2>
+        <span id="trail-count-badge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300">0 條連線</span>
+      </div>
+      <div id="note-log-box" class="bg-slate-950/85 border border-slate-800 rounded-xl p-2 h-28 overflow-y-auto custom-scroll font-mono text-[11px] text-slate-300 space-y-1">
+        <div class="text-slate-500">系統就緒，請點擊下方播放或匯入 .mid 檔案...</div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- 底部 MIDI 樂曲解析與播放控制台 -->
+  <footer class="fixed bottom-3 left-3 right-3 z-20 glass-panel rounded-2xl px-4 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+      <select id="select-preset-midi" class="bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-1.5 text-xs text-amber-200 focus:outline-none">
+        <option value="bach">示範 1：巴赫 C 大調前奏曲 BWV 846</option>
+        <option value="pentatonic">示範 2：432Hz 五聲音階神聖幾何冥想</option>
+        <option value="merkaba12">示範 3：梅爾卡巴十二音階對稱琶音</option>
+      </select>
+
+      <label class="cursor-pointer px-3 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-200 border border-cyan-400/45 transition flex items-center gap-1.5">
+        <span>📂 匯入 .MID 檔</span>
+        <input id="input-midi-file" type="file" accept=".mid,.midi" class="hidden" />
+      </label>
+
+      <span id="midi-track-name" class="text-xs text-slate-300 truncate max-w-[180px] hidden sm:inline">
+        巴赫前奏曲 BWV 846
+      </span>
+    </div>
+
+    <div class="flex items-center gap-2.5 w-full lg:flex-1 max-w-2xl">
+      <button id="btn-play" class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg transition">
+        ▶ 播放
+      </button>
+      <button id="btn-pause" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">
+        ⏸ 暫停
+      </button>
+      <button id="btn-stop" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">
+        ⏹ 停止
+      </button>
+
+      <span id="time-current" class="text-[11px] font-mono text-slate-300 w-10 text-right">00:00</span>
+      <input id="slider-progress" type="range" min="0" max="1000" value="0" class="flex-1 gold-slider" />
+      <span id="time-total" class="text-[11px] font-mono text-slate-400 w-10">00:00</span>
+    </div>
+
+    <div class="flex items-center gap-2 w-full lg:w-auto justify-end">
+      <select id="select-timbre" class="bg-slate-950 border border-purple-500/40 rounded-xl px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none">
+        <option value="singing-bowl">音色：水晶頌缽泛音</option>
+        <option value="warm-synth">音色：溫暖三角波合成</option>
+        <option value="ethereal-pad">音色：空靈宇宙弦樂</option>
+      </select>
+
+      <select id="select-speed" class="bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs font-mono text-cyan-300 focus:outline-none">
+        <option value="0.5">0.5x</option>
+        <option value="0.75">0.75x</option>
+        <option value="1" selected>1.0x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2.0x</option>
+      </select>
+    </div>
+  </footer>
+
+  <!-- 輕量提示氣泡 -->
+  <div id="toast-banner" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full glass-panel border border-amber-400/60 text-xs font-medium text-amber-200 opacity-0 pointer-events-none transition-opacity duration-300">
+    提示訊息
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      /**
+       * ============================================================================
+       * 1. 純升記號音律常數與全域狀態 (嚴格只用升記號，絕不使用降記號)
+       * ============================================================================
+       */
+      const SHARP_NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+      const PITCH_COLORS = [
+        0xf59e0b, // C  琥珀金
+        0xf97316, // C# 熾焰橙
+        0xeab308, // D  太陽黃
+        0x84cc16, // D# 萊姆綠
+        0x10b981, // E  翡翠綠
+        0x14b8a6, // F  青玉色
+        0x06b6d4, // F# 極光青
+        0x3b82f6, // G  天穹藍
+        0x6366f1, // G# 靛青藍
+        0x8b5cf6, // A  紫羅蘭
+        0xd946ef, // A# 霓虹紫
+        0xf43f5e  // B  玫瑰紅
+      ];
+
+      const state = {
+        baseA4: 432,
+        spiralMode: 'chromatic',      // 'chromatic' (+1) 或 'fifths' (+7)
+        rootOffset: 0,                // 0 = C ... 11 = B
+        topology: 'plane',            // 'plane' | 'cone' | 'torus'
+        morphTension: 1.0,
+        merkabaVisible: true,
+        merkabaScale: 1.0,
+        merkabaAzimuthDeg: 0,
+        merkabaElevationDeg: 0,
+        merkabaTwistDeg: 0,
+        merkabaAutoSpin: false,
+        metatronVisible: true,
+        metatronWiresVisible: true,
+        metatronScale: 1.0,
+        metatronHeight: 3.8,
+        metatronRotDeg: 0,
+        hexTrailVisible: true,
+        metatronTrailVisible: true,
+        trailMode: 'persist',         // 'persist' | 'fade'
+        trailThickness: 2.0,          // 預設 2.0x 明顯粗於線框
+        trailOpacity: 0.88,
+        octaveResonance: true,
+        showLabels: true,
+        panelsVisible: true,
+        timbre: 'singing-bowl',
+        playbackSpeed: 1.0,
+        isPlaying: false,
+        isPaused: false,
+        currentTimeSec: 0,
+        totalDurationSec: 0,
+        midiEvents: []
+      };
+
+      function midiToSharpName(midi) {
+        const noteIndex = ((midi % 12) + 12) % 12;
+        const octave = Math.floor(midi / 12) - 1;
+        return `${SHARP_NOTES[noteIndex]}${octave}`;
+      }
+
+      function midiToFrequency(midi) {
+        return state.baseA4 * Math.pow(2, (midi - 69) / 12);
+      }
+
+      let toastTimer = null;
+      function showToast(msg) {
+        const el = document.getElementById('toast-banner');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.opacity = '1';
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          el.style.opacity = '0';
+        }, 2600);
+      }
+
+      /**
+       * ============================================================================
+       * 2. Web Audio API 多音色神聖幾何合成器 (點擊即響、零外部音檔依賴)
+       * ============================================================================
+       */
+      class SacredAudioEngine {
+        constructor() {
+          this.ctx = null;
+          this.masterGain = null;
+        }
+
+        init() {
+          if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+            this.masterGain = this.ctx.createGain();
+            this.masterGain.gain.value = 0.42;
+
+            const compressor = this.ctx.createDynamicsCompressor();
+            compressor.threshold.value = -16;
+            compressor.knee.value = 24;
+            compressor.ratio.value = 6;
+            compressor.attack.value = 0.005;
+            compressor.release.value = 0.25;
+
+            this.masterGain.connect(compressor);
+            compressor.connect(this.ctx.destination);
+          }
+          if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+          }
+        }
+
+        playNote(midi, durationSec = 0.65, velocity = 0.8) {
+          try {
+            this.init();
+            const now = this.ctx.currentTime;
+            const freq = midiToFrequency(midi);
+            const dur = Math.max(0.18, Math.min(3.5, durationSec));
+            const vel = Math.max(0.1, Math.min(1.0, velocity));
+
+            const noteGain = this.ctx.createGain();
+            noteGain.connect(this.masterGain);
+
+            if (state.timbre === 'singing-bowl') {
+              // 水晶頌缽泛音：基頻 + 2.756 倍泛音 + 5.404 倍高泛音
+              const ratios = [1, 2.756, 5.404];
+              const amps = [0.65, 0.22, 0.08];
+              noteGain.gain.setValueAtTime(0.0001, now);
+              noteGain.gain.linearRampToValueAtTime(vel * 0.45, now + 0.025);
+              noteGain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.85);
+
+              ratios.forEach((r, idx) => {
+                const osc = this.ctx.createOscillator();
+                const partialGain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq * r, now);
+                partialGain.gain.value = amps[idx];
+                osc.connect(partialGain);
+                partialGain.connect(noteGain);
+                osc.start(now);
+                osc.stop(now + dur + 0.9);
+              });
+            } else if (state.timbre === 'warm-synth') {
+              // 溫暖三角波 + 低通濾波
+              const osc = this.ctx.createOscillator();
+              const filter = this.ctx.createBiquadFilter();
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(freq, now);
+
+              filter.type = 'lowpass';
+              filter.frequency.setValueAtTime(freq * 4.5, now);
+              filter.frequency.exponentialRampToValueAtTime(Math.max(240, freq * 1.4), now + dur + 0.3);
+
+              noteGain.gain.setValueAtTime(0.0001, now);
+              noteGain.gain.linearRampToValueAtTime(vel * 0.48, now + 0.015);
+              noteGain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.45);
+
+              osc.connect(filter);
+              filter.connect(noteGain);
+              osc.start(now);
+              osc.stop(now + dur + 0.5);
+            } else {
+              // 空靈宇宙弦樂 (雙微失諧鋸齒/正弦疊加)
+              [-5, 5].forEach((detuneCents) => {
+                const osc = this.ctx.createOscillator();
+                const filter = this.ctx.createBiquadFilter();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, now);
+                osc.detune.setValueAtTime(detuneCents, now);
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1400, now);
+
+                osc.connect(filter);
+                filter.connect(noteGain);
+                osc.start(now);
+                osc.stop(now + dur + 0.95);
+              });
+
+              noteGain.gain.setValueAtTime(0.0001, now);
+              noteGain.gain.linearRampToValueAtTime(vel * 0.24, now + 0.09);
+              noteGain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.9);
+            }
+          } catch (err) {
+            console.warn('Audio playback skipped:', err);
+          }
+        }
+      }
+
+      const audioEngine = new SacredAudioEngine();
+
+      /**
+       * ============================================================================
+       * 3. 完整 Standard MIDI File (SMF Type 0 / Type 1) 解析器與內建示範曲
+       * ============================================================================
+       */
+      function parseStandardMidi(arrayBuffer) {
+        const view = new DataView(arrayBuffer);
+        let offset = 0;
+
+        function readStr(len) {
+          let s = '';
+          for (let i = 0; i < len; i++) {
+            s += String.fromCharCode(view.getUint8(offset++));
+          }
+          return s;
+        }
+
+        function readVarLen() {
+          let value = 0;
+          let byte = 0;
+          do {
+            byte = view.getUint8(offset++);
+            value = (value << 7) | (byte & 0x7f);
+          } while (byte & 0x80);
+          return value;
+        }
+
+        if (readStr(4) !== 'MThd') {
+          throw new Error('非有效的標準 MIDI 檔案標頭 (MThd)');
+        }
+        const headerLen = view.getUint32(offset);
+        offset += 4;
+        const format = view.getUint16(offset);
+        const numTracks = view.getUint16(offset + 2);
+        const division = view.getUint16(offset + 4);
+        offset += headerLen;
+
+        if (division & 0x8000) {
+          throw new Error('不支援 SMPTE 時間碼格式 MIDI');
+        }
+        const ticksPerQuarter = division;
+
+        const rawEvents = [];
+        for (let t = 0; t < numTracks; t++) {
+          if (offset + 8 > view.byteLength) break;
+          const chunkId = readStr(4);
+          const chunkLen = view.getUint32(offset);
+          offset += 4;
+          const trackEnd = offset + chunkLen;
+
+          if (chunkId !== 'MTrk') {
+            offset = trackEnd;
+            continue;
+          }
+
+          let absTick = 0;
+          let runningStatus = 0;
+
+          while (offset < trackEnd) {
+            const delta = readVarLen();
+            absTick += delta;
+            let statusByte = view.getUint8(offset);
+
+            if (statusByte < 0x80) {
+              statusByte = runningStatus;
+            } else {
+              offset++;
+              if (statusByte < 0xf0) {
+                runningStatus = statusByte;
+              }
+            }
+
+            if (statusByte === 0xff) {
+              const metaType = view.getUint8(offset++);
+              const len = readVarLen();
+              if (metaType === 0x51 && len === 3) {
+                const mpqn =
+                  (view.getUint8(offset) << 16) |
+                  (view.getUint8(offset + 1) << 8) |
+                  view.getUint8(offset + 2);
+                rawEvents.push({ tick: absTick, type: 'tempo', mpqn });
+              }
+              offset += len;
+            } else if (statusByte === 0xf0 || statusByte === 0xf7) {
+              const len = readVarLen();
+              offset += len;
+            } else {
+              const cmd = statusByte & 0xf0;
+              const data1 = view.getUint8(offset++);
+              const data2 = (cmd === 0xc0 || cmd === 0xd0) ? 0 : view.getUint8(offset++);
+
+              if (cmd === 0x90 && data2 > 0) {
+                rawEvents.push({ tick: absTick, type: 'on', midi: data1, velocity: data2 / 127 });
+              } else if (cmd === 0x80 || (cmd === 0x90 && data2 === 0)) {
+                rawEvents.push({ tick: absTick, type: 'off', midi: data1 });
+              }
+            }
+          }
+          offset = trackEnd;
+        }
+
+        rawEvents.sort((a, b) => a.tick - b.tick);
+
+        // 將 tick 轉換為實際秒數 (處理速度變化 Tempo Map)
+        let currentMpqn = 500000; // 預設 120 BPM
+        let lastTick = 0;
+        let currentSec = 0;
+        const activeNotes = new Map();
+        const completedNotes = [];
+
+        for (const ev of rawEvents) {
+          const deltaTicks = ev.tick - lastTick;
+          currentSec += (deltaTicks / ticksPerQuarter) * (currentMpqn / 1000000);
+          lastTick = ev.tick;
+
+          if (ev.type === 'tempo') {
+            currentMpqn = ev.mpqn;
+          } else if (ev.type === 'on') {
+            if (!activeNotes.has(ev.midi)) activeNotes.set(ev.midi, []);
+            activeNotes.get(ev.midi).push({ startSec: currentSec, velocity: ev.velocity });
+          } else if (ev.type === 'off') {
+            const stack = activeNotes.get(ev.midi);
+            if (stack && stack.length > 0) {
+              const startObj = stack.shift();
+              completedNotes.push({
+                timeSec: startObj.startSec,
+                durationSec: Math.max(0.15, currentSec - startObj.startSec),
+                midi: ev.midi,
+                velocity: startObj.velocity
+              });
+            }
+          }
+        }
+
+        completedNotes.sort((a, b) => a.timeSec - b.timeSec);
+        const totalDurationSec = completedNotes.length
+          ? Math.max(...completedNotes.map((n) => n.timeSec + n.durationSec)) + 0.5
+          : 4;
+
+        return { events: completedNotes, totalDurationSec };
+      }
+
+      function buildPresetMidi(presetKey) {
+        const events = [];
+        if (presetKey === 'bach') {
+          // 巴赫 C 大調前奏曲 BWV 846 前 8 小節經典分解和弦與幾何對稱進行
+          const chords = [
+            [60, 64, 67, 72, 76], // C major
+            [60, 62, 69, 74, 77], // Dm7/C
+            [59, 62, 67, 74, 79], // G7/B
+            [60, 64, 67, 72, 76], // C major
+            [60, 64, 69, 76, 81], // Am/C
+            [60, 62, 66, 69, 74], // D7/C
+            [59, 62, 67, 74, 79], // G/B
+            [59, 60, 64, 67, 72]  // Cmaj7/B
+          ];
+          const step = 0.22;
+          let t = 0.1;
+          chords.forEach((ch) => {
+            const pattern = [ch[0], ch[1], ch[2], ch[3], ch[4], ch[2], ch[3], ch[4]];
+            for (let rep = 0; rep < 2; rep++) {
+              pattern.forEach((midi, idx) => {
+                events.push({
+                  timeSec: t,
+                  durationSec: idx === 0 ? 1.5 : 0.42,
+                  midi,
+                  velocity: idx === 0 ? 0.85 : 0.68
+                });
+                t += step;
+              });
+            }
+          });
+          return { events, totalDurationSec: t + 0.8 };
+        } else if (presetKey === 'pentatonic') {
+          // 432Hz 神聖五聲音階與和弦共鳴冥想 (純升記號: C, D, E, G, A)
+          const melody = [
+            { notes: [48, 60, 67], t: 0.1, d: 1.4 },
+            { notes: [64], t: 0.7, d: 0.8 },
+            { notes: [69], t: 1.3, d: 0.9 },
+            { notes: [53, 65, 72], t: 2.0, d: 1.5 },
+            { notes: [69], t: 2.7, d: 0.8 },
+            { notes: [74], t: 3.4, d: 0.9 },
+            { notes: [55, 67, 74], t: 4.1, d: 1.5 },
+            { notes: [76], t: 4.8, d: 0.9 },
+            { notes: [79], t: 5.5, d: 1.1 },
+            { notes: [48, 60, 64, 67, 72], t: 6.4, d: 2.4 }
+          ];
+          melody.forEach((item) => {
+            item.notes.forEach((m) => {
+              events.push({ timeSec: item.t, durationSec: item.d, midi: m, velocity: 0.78 });
+            });
+          });
+          return { events, totalDurationSec: 9.2 };
+        } else {
+          // 梅爾卡巴十二音階鏡像對稱琶音 (完整走遍 C -> C# -> D -> ... -> B)
+          let t = 0.15;
+          for (let i = 0; i < 12; i++) {
+            const upMidi = 60 + i;
+            const mirrorMidi = 72 - i;
+            events.push({ timeSec: t, durationSec: 0.45, midi: upMidi, velocity: 0.82 });
+            events.push({ timeSec: t + 0.18, durationSec: 0.45, midi: mirrorMidi, velocity: 0.75 });
+            t += 0.42;
+          }
+          // 結尾全音階神聖和弦
+          [48, 55, 60, 64, 67, 71, 74].forEach((m) => {
+            events.push({ timeSec: t + 0.2, durationSec: 2.2, midi: m, velocity: 0.8 });
+          });
+          return { events, totalDurationSec: t + 2.6 };
+        }
+      }
+
+      /**
+       * ============================================================================
+       * 4. Three.js 3D 場景、燈光、星空與攝影機控制器初始化
+       * ============================================================================
+       */
+      const container = document.getElementById('canvas-container');
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x05070e);
+      scene.fog = new THREE.FogExp2(0x05070e, 0.011);
+
+      const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 400);
+      camera.position.set(0, 22, 21);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      container.appendChild(renderer.domElement);
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.065;
+      controls.minDistance = 6;
+      controls.maxDistance = 85;
+      controls.maxPolarAngle = Math.PI * 0.92;
+
+      // 宇宙環境光與三點光源
+      scene.add(new THREE.AmbientLight(0x94a3b8, 0.75));
+      const keyLight = new THREE.PointLight(0xfde68a, 1.3, 90);
+      keyLight.position.set(14, 24, 14);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.PointLight(0x38bdf8, 1.0, 90);
+      fillLight.position.set(-18, 16, -15);
+      scene.add(fillLight);
+
+      const emeraldLight = new THREE.PointLight(0x34d399, 0.85, 70);
+      emeraldLight.position.set(0, 14, 0);
+      scene.add(emeraldLight);
+
+      // 背景深空星塵粒子
+      (function buildStarfield() {
+        const starCount = 1400;
+        const positions = new Float32Array(starCount * 3);
+        const colors = new Float32Array(starCount * 3);
+        const palette = [new THREE.Color(0xfef08a), new THREE.Color(0x7dd3fc), new THREE.Color(0xd8b4fe), new THREE.Color(0xffffff)];
+        for (let i = 0; i < starCount; i++) {
+          const r = 45 + Math.random() * 130;
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+          positions[i * 3 + 1] = r * Math.cos(phi);
+          positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+          const c = palette[i % palette.length];
+          colors[i * 3] = c.r;
+          colors[i * 3 + 1] = c.g;
+          colors[i * 3 + 2] = c.b;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const mat = new THREE.PointsMaterial({
+          size: 0.42,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.78
+        });
+        scene.add(new THREE.Points(geo, mat));
+      })();
+
+      /**
+       * ============================================================================
+       * 5. 六角星盤矩陣 (7 圈 168 節點) 與 3D 立體管狀軌跡系統
+       * ============================================================================
+       */
+      const hexGroup = new THREE.Group();
+      scene.add(hexGroup);
+
+      // 中央神聖空心六邊形基準環
+      const centerVoidGeo = new THREE.RingGeometry(0.45, 0.72, 6);
+      const centerVoidMat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.55
+      });
+      const centerVoidMesh = new THREE.Mesh(centerVoidGeo, centerVoidMat);
+      centerVoidMesh.rotation.x = -Math.PI / 2;
+      hexGroup.add(centerVoidMesh);
+
+      // 獨立群組 1：六角星盤軌跡群組
+      const trailGroup = new THREE.Group();
+      scene.add(trailGroup);
+
+      // 獨立群組 2：梅塔特隆 12 頂點軌跡群組
+      const metatronTrailGroup = new THREE.Group();
+      scene.add(metatronTrailGroup);
+
+      const trailRecords = [];
+      const trailNodeSet = new Set();
+      let lastTriggeredCell = null;
+      let lastTriggerTimestamp = 0;
+      let chordClusterCells = [];
+
+      const metatronTrailRecords = [];
+      const metatronNodeSet = new Set();
+      let lastTriggeredMetatronNode = null;
+      let lastMetatronTimestamp = 0;
+      let metatronChordCluster = [];
+
+      function updateTrailCountBadge() {
+        const badge = document.getElementById('trail-count-badge');
+        if (badge) {
+          badge.textContent = `${trailRecords.length + metatronTrailRecords.length} 條連線`;
+        }
+      }
+
+      function clearTrajectoryTrail() {
+        while (trailGroup.children.length > 0) {
+          const obj = trailGroup.children[0];
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+          trailGroup.remove(obj);
+        }
+        trailRecords.length = 0;
+        trailNodeSet.clear();
+        lastTriggeredCell = null;
+        chordClusterCells = [];
+
+        while (metatronTrailGroup.children.length > 0) {
+          const obj = metatronTrailGroup.children[0];
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+          metatronTrailGroup.remove(obj);
+        }
+        metatronTrailRecords.length = 0;
+        metatronNodeSet.clear();
+        lastTriggeredMetatronNode = null;
+        metatronChordCluster = [];
+
+        updateTrailCountBadge();
+      }
+
+      // 六角星盤 3D 立體管狀連線 (THREE.TubeGeometry)
+      function buildHexTubeGeometry(p1, p2, isChordEdge) {
+        const baseRadius = (isChordEdge ? 0.055 : 0.075) * state.trailThickness;
+        const tubularSegments = 18;
+        const radialSegments = 8;
+
+        const mid = p1.clone().add(p2).multiplyScalar(0.5);
+        const dist = p1.distanceTo(p2);
+        mid.y += isChordEdge ? 0.25 : Math.min(2.2, 0.35 + dist * 0.12);
+
+        const curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, baseRadius, radialSegments, false);
+
+        const posAttr = geo.attributes.position;
+        const colors = new Float32Array(posAttr.count * 3);
+        const cStart = isChordEdge ? new THREE.Color(0xa855f7) : new THREE.Color(0xfbbf24);
+        const cEnd = isChordEdge ? new THREE.Color(0xd946ef) : new THREE.Color(0x22d3ee);
+
+        for (let i = 0; i <= tubularSegments; i++) {
+          const t = i / tubularSegments;
+          const c = cStart.clone().lerp(cEnd, t);
+          for (let j = 0; j <= radialSegments; j++) {
+            const idx = (i * (radialSegments + 1) + j) * 3;
+            if (idx + 2 < colors.length) {
+              colors[idx] = c.r;
+              colors[idx + 1] = c.g;
+              colors[idx + 2] = c.b;
+            }
+          }
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        return geo;
+      }
+
+      function createTrajectorySegment(cellA, cellB, isChordEdge = false) {
+        if (!cellA || !cellB || cellA === cellB) return;
+        const p1 = cellA.basePos.clone().add(new THREE.Vector3(0, 0.24, 0));
+        const p2 = cellB.basePos.clone().add(new THREE.Vector3(0, 0.24, 0));
+        const geometry = buildHexTubeGeometry(p1, p2, isChordEdge);
+
+        const material = new THREE.MeshBasicMaterial({
+          vertexColors: true,
+          transparent: true,
+          opacity: state.trailOpacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        trailGroup.add(mesh);
+        trailRecords.push({
+          line: mesh,
+          material,
+          cellA,
+          cellB,
+          isChordEdge,
+          createdAt: performance.now()
+        });
+        updateTrailCountBadge();
+      }
+
+      function ensureHexNodeMarker(cell) {
+        if (trailNodeSet.has(cell.id)) return;
+        trailNodeSet.add(cell.id);
+
+        const dotGeo = new THREE.SphereGeometry(0.22, 12, 12);
+        const dotMat = new THREE.MeshBasicMaterial({
+          color: 0xfde047,
+          transparent: true,
+          opacity: state.trailOpacity,
+          blending: THREE.AdditiveBlending
+        });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.copy(cell.basePos).add(new THREE.Vector3(0, 0.25, 0));
+        dot.scale.setScalar(0.65 + state.trailThickness * 0.35);
+        dot.userData = { isNodeDot: true, cell, createdAt: performance.now() };
+        trailGroup.add(dot);
+      }
+
+      function rebuildTrajectoryPositions() {
+        trailRecords.forEach((rec) => {
+          const p1 = rec.cellA.basePos.clone().add(new THREE.Vector3(0, 0.24, 0));
+          const p2 = rec.cellB.basePos.clone().add(new THREE.Vector3(0, 0.24, 0));
+          const newGeo = buildHexTubeGeometry(p1, p2, rec.isChordEdge);
+          rec.line.geometry.dispose();
+          rec.line.geometry = newGeo;
+        });
+
+        trailGroup.children.forEach((child) => {
+          if (child.userData && child.userData.isNodeDot && child.userData.cell) {
+            child.position.copy(child.userData.cell.basePos).add(new THREE.Vector3(0, 0.25, 0));
+            child.scale.setScalar(0.65 + state.trailThickness * 0.35);
+          }
+        });
+      }
+
+      function recordNoteTrajectory(targetCell) {
+        if (!targetCell) return;
+        const now = performance.now();
+        ensureHexNodeMarker(targetCell);
+
+        if (now - lastTriggerTimestamp < 50) {
+          chordClusterCells.forEach((prevCell) => {
+            if (prevCell !== targetCell) {
+              createTrajectorySegment(prevCell, targetCell, true);
+            }
+          });
+          if (!chordClusterCells.includes(targetCell)) {
+            chordClusterCells.push(targetCell);
+          }
+        } else {
+          if (lastTriggeredCell && lastTriggeredCell !== targetCell) {
+            createTrajectorySegment(lastTriggeredCell, targetCell, false);
+          }
+          chordClusterCells = [targetCell];
+        }
+
+        lastTriggeredCell = targetCell;
+        lastTriggerTimestamp = now;
+      }
+
+      // 建立高清純升記號文字 Sprite
+      function createNoteLabelSprite(text, hexColor) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 80;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 160, 80);
+
+        ctx.font = 'bold 34px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(5, 7, 14, 0.78)';
+        ctx.fillText(text, 82, 42);
+
+        const c = new THREE.Color(hexColor);
+        const r = Math.min(255, Math.round(c.r * 255 + 95));
+        const g = Math.min(255, Math.round(c.g * 255 + 95));
+        const b = Math.min(255, Math.round(c.b * 255 + 95));
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillText(text, 80, 40);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(1.3, 0.65, 1);
+        return sprite;
+      }
+
+      const hexCells = [];
+      const NUM_RINGS = 7; // 7 圈共 168 個六角音階節點
+      const HEX_RADIUS = 0.72;
+      const HEX_SPACING = 1.48;
+
+      function axialToFlatXZ(q, r) {
+        const x = HEX_SPACING * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
+        const z = HEX_SPACING * ((3 / 2) * r);
+        return { x, z };
+      }
+
+      function getHexRingAxialCoords(ring) {
+        const results = [];
+        let q = 0;
+        let r = -ring;
+        const dirs = [
+          [1, 0],
+          [0, 1],
+          [-1, 1],
+          [-1, 0],
+          [0, -1],
+          [1, -1]
+        ];
+        for (let side = 0; side < 6; side++) {
+          for (let step = 0; step < ring; step++) {
+            results.push({ q, r });
+            q += dirs[side][0];
+            r += dirs[side][1];
+          }
+        }
+        return results;
+      }
+
+      function buildHexMatrix() {
+        hexCells.forEach((c) => {
+          hexGroup.remove(c.mesh);
+          hexGroup.remove(c.labelSprite);
+          c.mesh.geometry.dispose();
+          c.mesh.material.dispose();
+          c.labelSprite.material.map.dispose();
+          c.labelSprite.material.dispose();
+        });
+        hexCells.length = 0;
+
+        const hexGeo = new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS, 0.24, 6);
+        const edgesGeo = new THREE.EdgesGeometry(hexGeo);
+
+        let globalIndex = 0;
+        for (let ring = 1; ring <= NUM_RINGS; ring++) {
+          const ringCoords = getHexRingAxialCoords(ring);
+          const totalInRing = ringCoords.length;
+
+          ringCoords.forEach((coord, indexInRing) => {
+            const flat = axialToFlatXZ(coord.q, coord.r);
+            const angle = Math.atan2(flat.z, flat.x);
+            const dist = Math.hypot(flat.x, flat.z);
+
+            const stepInterval = state.spiralMode === 'chromatic' ? 1 : 7;
+            const baseMidi = 36 + state.rootOffset + (ring - 1) * 12 + ((indexInRing * stepInterval) % 12);
+            const midi = Math.max(24, Math.min(108, baseMidi));
+            const pitchClass = midi % 12;
+            const sharpLabel = midiToSharpName(midi);
+            const baseHexColor = PITCH_COLORS[pitchClass];
+
+            const mat = new THREE.MeshStandardMaterial({
+              color: baseHexColor,
+              emissive: baseHexColor,
+              emissiveIntensity: 0.16,
+              roughness: 0.35,
+              metalness: 0.65,
+              transparent: true,
+              opacity: 0.88
+            });
+
+            const mesh = new THREE.Mesh(hexGeo, mat);
+            const wireMat = new THREE.LineBasicMaterial({
+              color: 0xfde68a,
+              transparent: true,
+              opacity: 0.35
+            });
+            const wire = new THREE.LineSegments(edgesGeo, wireMat);
+            mesh.add(wire);
+
+            const labelSprite = createNoteLabelSprite(sharpLabel, baseHexColor);
+            labelSprite.visible = state.showLabels;
+
+            const cell = {
+              id: globalIndex,
+              ring,
+              indexInRing,
+              totalInRing,
+              flatX: flat.x,
+              flatZ: flat.z,
+              angle,
+              dist,
+              midi,
+              pitchClass,
+              sharpLabel,
+              baseHexColor,
+              mesh,
+              wireMat,
+              labelSprite,
+              basePos: new THREE.Vector3(flat.x, 0, flat.z),
+              pulseEnergy: 0,
+              merkabaHighlight: false
+            };
+
+            mesh.userData = { cell };
+            hexGroup.add(mesh);
+            hexGroup.add(labelSprite);
+            hexCells.push(cell);
+            globalIndex++;
+          });
+        }
+
+        updateTopologyPositions();
+      }
+
+      function updateTopologyPositions() {
+        const maxDist = NUM_RINGS * HEX_SPACING * 1.45;
+        const t = state.morphTension;
+
+        hexCells.forEach((cell) => {
+          let targetX = cell.flatX;
+          let targetY = 0;
+          let targetZ = cell.flatZ;
+
+          if (state.topology === 'cone') {
+            const normR = cell.dist / maxDist;
+            const polarity = cell.ring % 2 === 1 ? 1 : -1;
+            const funnelY = polarity * (1 - Math.cos(normR * Math.PI * 0.5)) * 9.5;
+            const radialScale = 1 - normR * 0.25 * t;
+            targetX = cell.flatX * radialScale;
+            targetY = funnelY * t;
+            targetZ = cell.flatZ * radialScale;
+          } else if (state.topology === 'torus') {
+            const majorR = 9.2;
+            const minorR = 4.2;
+            const u = cell.angle;
+            const v = ((cell.ring - 1) / NUM_RINGS) * Math.PI * 2;
+            const tx = (majorR + minorR * Math.cos(v)) * Math.cos(u);
+            const ty = minorR * Math.sin(v);
+            const tz = (majorR + minorR * Math.cos(v)) * Math.sin(u);
+
+            targetX = THREE.MathUtils.lerp(cell.flatX, tx, t);
+            targetY = THREE.MathUtils.lerp(0, ty, t);
+            targetZ = THREE.MathUtils.lerp(cell.flatZ, tz, t);
+          }
+
+          cell.basePos.set(targetX, targetY, targetZ);
+          cell.mesh.position.copy(cell.basePos);
+          cell.labelSprite.position.set(targetX, targetY + 0.36, targetZ);
+        });
+
+        rebuildTrajectoryPositions();
+        detectMerkabaCollisions();
+      }
+
+      /**
+       * ============================================================================
+       * 6. 3D 梅爾卡巴 (Merkaba 雙四面體) 建構與三軸手動控制
+       * ============================================================================
+       */
+      const merkabaGroup = new THREE.Group();
+      scene.add(merkabaGroup);
+
+      const tetraUpGroup = new THREE.Group();
+      const tetraDownGroup = new THREE.Group();
+      merkabaGroup.add(tetraUpGroup);
+      merkabaGroup.add(tetraDownGroup);
+
+      const merkabaVertexMarkers = [];
+
+      function buildMerkaba3D() {
+        const R = 7.4;
+
+        const upGeo = new THREE.TetrahedronGeometry(R, 0);
+        upGeo.rotateZ(Math.PI / 4);
+        upGeo.rotateX(Math.atan(1 / Math.SQRT2));
+
+        const upSolidMat = new THREE.MeshBasicMaterial({
+          color: 0xfbbf24,
+          transparent: true,
+          opacity: 0.07,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        });
+        const upWireMat = new THREE.LineBasicMaterial({
+          color: 0xfde047,
+          transparent: true,
+          opacity: 0.85
+        });
+        tetraUpGroup.add(new THREE.Mesh(upGeo, upSolidMat));
+        tetraUpGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(upGeo), upWireMat));
+
+        const downGeo = upGeo.clone();
+        downGeo.rotateX(Math.PI);
+
+        const downSolidMat = new THREE.MeshBasicMaterial({
+          color: 0xa855f7,
+          transparent: true,
+          opacity: 0.07,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        });
+        const downWireMat = new THREE.LineBasicMaterial({
+          color: 0xc084fc,
+          transparent: true,
+          opacity: 0.85
+        });
+        tetraDownGroup.add(new THREE.Mesh(downGeo, downSolidMat));
+        tetraDownGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(downGeo), downWireMat));
+
+        function extractUniqueVertices(geometry) {
+          const posAttr = geometry.attributes.position;
+          const unique = [];
+          for (let i = 0; i < posAttr.count; i++) {
+            const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+            if (!unique.some((u) => u.distanceTo(v) < 0.05)) {
+              unique.push(v);
+            }
+          }
+          return unique;
+        }
+
+        const upVerts = extractUniqueVertices(upGeo);
+        const downVerts = extractUniqueVertices(downGeo);
+        const sphereGeo = new THREE.SphereGeometry(0.28, 14, 14);
+
+        upVerts.forEach((v, idx) => {
+          const marker = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xfef08a }));
+          marker.position.copy(v);
+          tetraUpGroup.add(marker);
+          merkabaVertexMarkers.push({ polarity: '陽', index: idx + 1, marker, capturedCell: null });
+        });
+
+        downVerts.forEach((v, idx) => {
+          const marker = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xd8b4fe }));
+          marker.position.copy(v);
+          tetraDownGroup.add(marker);
+          merkabaVertexMarkers.push({ polarity: '陰', index: idx + 1, marker, capturedCell: null });
+        });
+      }
+
+      function applyMerkabaTransforms() {
+        const azRad = THREE.MathUtils.degToRad(state.merkabaAzimuthDeg);
+        const elRad = THREE.MathUtils.degToRad(state.merkabaElevationDeg);
+        const twistRad = THREE.MathUtils.degToRad(state.merkabaTwistDeg);
+
+        merkabaGroup.rotation.set(elRad, azRad, 0, 'YXZ');
+        tetraUpGroup.rotation.y = twistRad * 0.5;
+        tetraDownGroup.rotation.y = -twistRad * 0.5;
+        merkabaGroup.scale.setScalar(state.merkabaScale);
+        merkabaGroup.visible = state.merkabaVisible;
+
+        detectMerkabaCollisions();
+      }
+
+      function detectMerkabaCollisions() {
+        if (!hexCells.length || !merkabaVertexMarkers.length) return;
+
+        hexCells.forEach((c) => { c.merkabaHighlight = false; });
+        merkabaGroup.updateMatrixWorld(true);
+
+        const listContainer = document.getElementById('merkaba-vertex-list');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+        const worldPos = new THREE.Vector3();
+
+        merkabaVertexMarkers.forEach((vm) => {
+          vm.marker.getWorldPosition(worldPos);
+          let nearestCell = null;
+          let minDist = Infinity;
+
+          for (let i = 0; i < hexCells.length; i++) {
+            const d = worldPos.distanceTo(hexCells[i].basePos);
+            if (d < minDist) {
+              minDist = d;
+              nearestCell = hexCells[i];
+            }
+          }
+
+          vm.capturedCell = nearestCell;
+          if (nearestCell && state.merkabaVisible) {
+            nearestCell.merkabaHighlight = true;
+          }
+
+          const badgeColor = vm.polarity === '陽'
+            ? 'border-amber-400/40 text-amber-200 bg-amber-500/10'
+            : 'border-purple-400/40 text-purple-200 bg-purple-500/10';
+          const noteStr = nearestCell ? nearestCell.sharpLabel : '--';
+          const freqStr = nearestCell ? `${Math.round(midiToFrequency(nearestCell.midi))}Hz` : '';
+
+          const item = document.createElement('div');
+          item.className = `px-2 py-1 rounded-lg border ${badgeColor} flex items-center justify-between`;
+          item.innerHTML = `<span>${vm.polarity}${vm.index}: <b>${noteStr}</b></span><span class="text-[9px] opacity-80">${freqStr}</span>`;
+          listContainer.appendChild(item);
+        });
+      }
+
+      function playMerkabaVerticesArpeggio() {
+        if (!merkabaVertexMarkers.length) return;
+        audioEngine.init();
+        merkabaVertexMarkers.forEach((vm, idx) => {
+          if (!vm.capturedCell) return;
+          setTimeout(() => {
+            triggerVisualAndAudioNote(
+              vm.capturedCell.midi,
+              0.75,
+              0.85,
+              `梅爾卡巴${vm.polarity}${vm.index}`,
+              vm.capturedCell
+            );
+          }, idx * 210);
+        });
+      }
+
+      /**
+       * ============================================================================
+       * 7. 3D 梅塔特隆立方體 (Metatron's Cube) 12 頂點音階矩陣與獨立空間軌跡
+       * ============================================================================
+       */
+      const metatronGroup = new THREE.Group();
+      scene.add(metatronGroup);
+
+      const metatronWireGroup = new THREE.Group();
+      metatronGroup.add(metatronWireGroup);
+
+      const metatronNodes = [];
+      let metatronCenterSphere = null;
+
+      function buildMetatronCube() {
+        while (metatronWireGroup.children.length > 0) {
+          const obj = metatronWireGroup.children[0];
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+          metatronWireGroup.remove(obj);
+        }
+        metatronNodes.forEach((n) => {
+          metatronGroup.remove(n.mesh);
+          metatronGroup.remove(n.labelSprite);
+          n.mesh.geometry.dispose();
+          n.mesh.material.dispose();
+          n.labelSprite.material.map.dispose();
+          n.labelSprite.material.dispose();
+        });
+        metatronNodes.length = 0;
+
+        if (metatronCenterSphere) {
+          metatronGroup.remove(metatronCenterSphere);
+          metatronCenterSphere.geometry.dispose();
+          metatronCenterSphere.material.dispose();
+        }
+
+        // 中心果實原點球 (第 13 個基準點)
+        const centerGeo = new THREE.SphereGeometry(0.34, 16, 16);
+        const centerMat = new THREE.MeshBasicMaterial({
+          color: 0x34d399,
+          transparent: true,
+          opacity: 0.78
+        });
+        metatronCenterSphere = new THREE.Mesh(centerGeo, centerMat);
+        metatronCenterSphere.position.set(0, 0, 0);
+        metatronGroup.add(metatronCenterSphere);
+
+        // 內圈 6 頂點 + 外圈 6 頂點 (共 12 個立體音階頂點)
+        const innerR = 4.6;
+        const outerR = 9.2;
+        const stepInterval = state.spiralMode === 'chromatic' ? 1 : 7;
+
+        const rawVertices = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3 - Math.PI / 2;
+          const yOffset = i % 2 === 0 ? 1.8 : -1.8;
+          rawVertices.push({
+            layer: '內環',
+            index: i,
+            pos: new THREE.Vector3(Math.cos(angle) * innerR, yOffset, Math.sin(angle) * innerR)
+          });
+        }
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3 - Math.PI / 2 + Math.PI / 6;
+          const yOffset = i % 2 === 0 ? 3.4 : -3.4;
+          rawVertices.push({
+            layer: '外環',
+            index: i + 6,
+            pos: new THREE.Vector3(Math.cos(angle) * outerR, yOffset, Math.sin(angle) * outerR)
+          });
+        }
+
+        const sphereGeo = new THREE.SphereGeometry(0.38, 18, 18);
+
+        rawVertices.forEach((vInfo, idx) => {
+          const pitchClass = (state.rootOffset + idx * stepInterval) % 12;
+          const baseMidi = (idx < 6 ? 60 : 72) + pitchClass;
+          const sharpName = SHARP_NOTES[pitchClass];
+          const colorHex = PITCH_COLORS[pitchClass];
+
+          const mat = new THREE.MeshStandardMaterial({
+            color: colorHex,
+            emissive: colorHex,
+            emissiveIntensity: 0.38,
+            roughness: 0.25,
+            metalness: 0.7
+          });
+          const mesh = new THREE.Mesh(sphereGeo, mat);
+          mesh.position.copy(vInfo.pos);
+
+          const ringGeo = new THREE.RingGeometry(0.48, 0.6, 24);
+          const ringMat = new THREE.MeshBasicMaterial({
+            color: 0x34d399,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.7
+          });
+          const halo = new THREE.Mesh(ringGeo, ringMat);
+          halo.rotation.x = -Math.PI / 2;
+          mesh.add(halo);
+
+          const labelSprite = createNoteLabelSprite(`${sharpName}`, colorHex);
+          labelSprite.position.copy(vInfo.pos).add(new THREE.Vector3(0, 0.7, 0));
+          labelSprite.scale.set(1.5, 0.75, 1);
+
+          const nodeObj = {
+            id: idx,
+            layer: vInfo.layer,
+            pitchClass,
+            midi: baseMidi,
+            sharpName,
+            colorHex,
+            localPos: vInfo.pos.clone(),
+            mesh,
+            labelSprite,
+            pulseEnergy: 0
+          };
+
+          mesh.userData = { metatronNode: nodeObj };
+          metatronGroup.add(mesh);
+          metatronGroup.add(labelSprite);
+          metatronNodes.push(nodeObj);
+        });
+
+        // 78 條神聖幾何全連接線 (13 點兩兩互連 C(13,2) = 78)
+        const allPoints = [metatronCenterSphere.position.clone(), ...metatronNodes.map((n) => n.localPos.clone())];
+        const linePositions = [];
+        for (let i = 0; i < allPoints.length; i++) {
+          for (let j = i + 1; j < allPoints.length; j++) {
+            linePositions.push(
+              allPoints[i].x, allPoints[i].y, allPoints[i].z,
+              allPoints[j].x, allPoints[j].y, allPoints[j].z
+            );
+          }
+        }
+        const wireGeo = new THREE.BufferGeometry();
+        wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+        const wireMat = new THREE.LineBasicMaterial({
+          color: 0x10b981,
+          transparent: true,
+          opacity: 0.25
+        });
+        metatronWireGroup.add(new THREE.LineSegments(wireGeo, wireMat));
+
+        applyMetatronTransforms();
+      }
+
+      function applyMetatronTransforms() {
+        metatronGroup.position.set(0, state.metatronHeight, 0);
+        metatronGroup.rotation.y = THREE.MathUtils.degToRad(state.metatronRotDeg);
+        metatronGroup.scale.setScalar(state.metatronScale);
+        metatronGroup.visible = state.metatronVisible;
+        metatronWireGroup.visible = state.metatronWiresVisible;
+        metatronTrailGroup.visible = state.metatronTrailVisible;
+        trailGroup.visible = state.hexTrailVisible;
+
+        metatronGroup.updateMatrixWorld(true);
+        rebuildMetatronTrajectoryPositions();
+      }
+
+      function getMetatronWorldPos(node) {
+        const worldVec = node.localPos.clone();
+        metatronGroup.updateMatrixWorld(true);
+        return worldVec.applyMatrix4(metatronGroup.matrixWorld);
+      }
+
+      function buildMetatronTubeGeometry(nodeA, nodeB, isChordEdge) {
+        const p1 = getMetatronWorldPos(nodeA);
+        const p2 = getMetatronWorldPos(nodeB);
+        const baseRadius = (isChordEdge ? 0.055 : 0.075) * state.trailThickness;
+        const tubularSegments = 18;
+        const radialSegments = 8;
+        const isSelfLoop = nodeA === nodeB;
+
+        let curve;
+        if (isSelfLoop) {
+          const loopPts = [];
+          const loopR = 0.72 * state.metatronScale;
+          for (let k = 0; k <= 16; k++) {
+            const a = (k / 16) * Math.PI * 2;
+            loopPts.push(new THREE.Vector3(p1.x + Math.cos(a) * loopR, p1.y + 0.12, p1.z + Math.sin(a) * loopR));
+          }
+          curve = new THREE.CatmullRomCurve3(loopPts, true);
+        } else {
+          const mid = p1.clone().add(p2).multiplyScalar(0.5);
+          mid.y += isChordEdge ? 0.25 : 0.5;
+          curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
+        }
+
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, baseRadius, radialSegments, isSelfLoop);
+        const posAttr = geo.attributes.position;
+        const colors = new Float32Array(posAttr.count * 3);
+        const cStart = isChordEdge ? new THREE.Color(0xf43f5e) : new THREE.Color(0x10b981);
+        const cEnd = new THREE.Color(0xfbbf24);
+
+        for (let i = 0; i <= tubularSegments; i++) {
+          const t = i / tubularSegments;
+          const c = cStart.clone().lerp(cEnd, t);
+          for (let j = 0; j <= radialSegments; j++) {
+            const idx = (i * (radialSegments + 1) + j) * 3;
+            if (idx + 2 < colors.length) {
+              colors[idx] = c.r;
+              colors[idx + 1] = c.g;
+              colors[idx + 2] = c.b;
+            }
+          }
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        return geo;
+      }
+
+      function createMetatronTrajectorySegment(nodeA, nodeB, isChordEdge = false) {
+        if (!nodeA || !nodeB) return;
+        const geometry = buildMetatronTubeGeometry(nodeA, nodeB, isChordEdge);
+
+        const material = new THREE.MeshBasicMaterial({
+          vertexColors: true,
+          transparent: true,
+          opacity: state.trailOpacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        metatronTrailGroup.add(mesh);
+        metatronTrailRecords.push({
+          line: mesh,
+          material,
+          nodeA,
+          nodeB,
+          isChordEdge,
+          createdAt: performance.now()
+        });
+        updateTrailCountBadge();
+      }
+
+      function ensureMetatronNodeMarker(node) {
+        if (metatronNodeSet.has(node.id)) return;
+        metatronNodeSet.add(node.id);
+
+        const dotGeo = new THREE.SphereGeometry(0.24, 12, 12);
+        const dotMat = new THREE.MeshBasicMaterial({
+          color: 0x34d399,
+          transparent: true,
+          opacity: state.trailOpacity,
+          blending: THREE.AdditiveBlending
+        });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.copy(getMetatronWorldPos(node));
+        dot.scale.setScalar(0.65 + state.trailThickness * 0.35);
+        dot.userData = { isMetatronDot: true, node, createdAt: performance.now() };
+        metatronTrailGroup.add(dot);
+      }
+
+      function rebuildMetatronTrajectoryPositions() {
+        metatronTrailRecords.forEach((rec) => {
+          const newGeo = buildMetatronTubeGeometry(rec.nodeA, rec.nodeB, rec.isChordEdge);
+          rec.line.geometry.dispose();
+          rec.line.geometry = newGeo;
+        });
+
+        metatronTrailGroup.children.forEach((child) => {
+          if (child.userData && child.userData.isMetatronDot && child.userData.node) {
+            child.position.copy(getMetatronWorldPos(child.userData.node));
+            child.scale.setScalar(0.65 + state.trailThickness * 0.35);
+          }
+        });
+      }
+
+      function recordMetatronTrajectory(targetNode) {
+        if (!targetNode) return;
+        const now = performance.now();
+        ensureMetatronNodeMarker(targetNode);
+
+        if (now - lastMetatronTimestamp < 50) {
+          metatronChordCluster.forEach((prevNode) => {
+            if (prevNode !== targetNode) {
+              createMetatronTrajectorySegment(prevNode, targetNode, true);
+            }
+          });
+          if (!metatronChordCluster.includes(targetNode)) {
+            metatronChordCluster.push(targetNode);
+          }
+        } else {
+          if (lastTriggeredMetatronNode) {
+            createMetatronTrajectorySegment(lastTriggeredMetatronNode, targetNode, false);
+          }
+          metatronChordCluster = [targetNode];
+        }
+
+        lastTriggeredMetatronNode = targetNode;
+        lastMetatronTimestamp = now;
+      }
+
+      function playMetatronVerticesArpeggio() {
+        if (!metatronNodes.length) return;
+        audioEngine.init();
+        metatronNodes.forEach((node, idx) => {
+          setTimeout(() => {
+            triggerVisualAndAudioNote(
+              node.midi,
+              0.7,
+              0.85,
+              `梅塔特隆${node.layer}#${idx + 1}`
+            );
+          }, idx * 190);
+        });
+      }
+
+      /**
+       * ============================================================================
+       * 8. 音符視覺與聲音聯動、滑鼠點選互動、MIDI 排程控制
+       * ============================================================================
+       */
+      const hudNoteEl = document.getElementById('hud-note');
+      const hudFreqEl = document.getElementById('hud-freq');
+      const hudCoordEl = document.getElementById('hud-coord');
+      const noteLogBox = document.getElementById('note-log-box');
+
+      function appendNoteLog(midi, sourceLabel) {
+        if (!noteLogBox) return;
+        const line = document.createElement('div');
+        const name = midiToSharpName(midi);
+        const freq = midiToFrequency(midi).toFixed(1);
+        line.innerHTML = `<span class="text-amber-300 font-bold">${name}</span> <span class="text-cyan-300">${freq}Hz</span> <span class="text-slate-500">[${sourceLabel}]</span>`;
+        noteLogBox.prepend(line);
+        while (noteLogBox.children.length > 40) {
+          noteLogBox.removeChild(noteLogBox.lastChild);
+        }
+      }
+
+      function triggerVisualAndAudioNote(midi, durationSec = 0.6, velocity = 0.8, sourceLabel = 'MIDI', specificCell = null) {
+        audioEngine.playNote(midi, durationSec, velocity);
+
+        const sharpName = midiToSharpName(midi);
+        const freq = midiToFrequency(midi).toFixed(2);
+        if (hudNoteEl) hudNoteEl.textContent = `${sharpName} (MIDI ${midi})`;
+        if (hudFreqEl) hudFreqEl.textContent = `${freq} Hz`;
+
+        let primaryCell = specificCell || hexCells.find((c) => c.midi === midi) || null;
+        if (!primaryCell) {
+          const pitchClass = ((midi % 12) + 12) % 12;
+          primaryCell = hexCells.find((c) => c.pitchClass === pitchClass) || null;
+        }
+
+        if (primaryCell) {
+          if (hudCoordEl) hudCoordEl.textContent = `第 ${primaryCell.ring} 環 · 節點 #${primaryCell.id + 1}`;
+          recordNoteTrajectory(primaryCell);
+        }
+
+        const targetPitchClass = ((midi % 12) + 12) % 12;
+        hexCells.forEach((cell) => {
+          if (primaryCell && cell === primaryCell) {
+            cell.pulseEnergy = 1.0;
+          } else if (cell.midi === midi) {
+            cell.pulseEnergy = 1.0;
+          } else if (state.octaveResonance && cell.pitchClass === targetPitchClass) {
+            cell.pulseEnergy = Math.max(cell.pulseEnergy, 0.72);
+          }
+        });
+
+        // 同步觸發梅塔特隆 12 頂點對應音級與空間軌跡
+        const matchedMetatronNode = metatronNodes.find((n) => n.pitchClass === targetPitchClass);
+        if (matchedMetatronNode) {
+          matchedMetatronNode.pulseEnergy = 1.0;
+          recordMetatronTrajectory(matchedMetatronNode);
+        }
+
+        appendNoteLog(midi, sourceLabel);
+      }
+
+      // 滑鼠點擊 3D 六角形或梅塔特隆 12 頂點直接發聲
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let pointerDownPos = { x: 0, y: 0 };
+
+      renderer.domElement.addEventListener('pointerdown', (e) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+      });
+
+      renderer.domElement.addEventListener('pointerup', (e) => {
+        const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+        if (moveDist > 6) return;
+
+        pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+        pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+
+        if (state.metatronVisible) {
+          const metaMeshes = metatronNodes.map((n) => n.mesh);
+          const metaHits = raycaster.intersectObjects(metaMeshes, false);
+          if (metaHits.length > 0) {
+            const mNode = metaHits[0].object.userData.metatronNode;
+            if (mNode) {
+              triggerVisualAndAudioNote(mNode.midi, 0.75, 0.9, `梅塔特隆頂點(${mNode.sharpName})`);
+              return;
+            }
+          }
+        }
+
+        const meshes = hexCells.map((c) => c.mesh);
+        const hits = raycaster.intersectObjects(meshes, false);
+        if (hits.length > 0) {
+          const cell = hits[0].object.userData.cell;
+          if (cell) {
+            triggerVisualAndAudioNote(cell.midi, 0.75, 0.88, '手動觸發', cell);
+          }
+        }
+      });
+
+      // MIDI 播放器排程狀態
+      let nextEventIndex = 0;
+
+      function formatTime(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const m = Math.floor(s / 60);
+        const rem = s % 60;
+        return `${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+      }
+
+      function loadMidiData(parsed, trackTitle) {
+        stopMidiPlayback();
+        clearTrajectoryTrail();
+        state.midiEvents = parsed.events;
+        state.totalDurationSec = parsed.totalDurationSec;
+        document.getElementById('midi-track-name').textContent = trackTitle;
+        document.getElementById('time-total').textContent = formatTime(state.totalDurationSec);
+        document.getElementById('time-current').textContent = '00:00';
+        document.getElementById('slider-progress').value = 0;
+      }
+
+      function playMidiPlayback() {
+        if (!state.midiEvents.length) {
+          showToast('請先選擇或匯入 MIDI 曲目');
+          return;
+        }
+        audioEngine.init();
+        if (state.currentTimeSec >= state.totalDurationSec || state.currentTimeSec === 0) {
+          state.currentTimeSec = 0;
+          nextEventIndex = 0;
+          clearTrajectoryTrail();
+        }
+        state.isPlaying = true;
+        state.isPaused = false;
+      }
+
+      function pauseMidiPlayback() {
+        if (state.isPlaying) {
+          state.isPlaying = false;
+          state.isPaused = true;
+        }
+      }
+
+      function stopMidiPlayback() {
+        state.isPlaying = false;
+        state.isPaused = false;
+        state.currentTimeSec = 0;
+        nextEventIndex = 0;
+        lastTriggeredCell = null;
+        chordClusterCells = [];
+        lastTriggeredMetatronNode = null;
+        metatronChordCluster = [];
+        document.getElementById('slider-progress').value = 0;
+        document.getElementById('time-current').textContent = '00:00';
+      }
+
+      /**
+       * ============================================================================
+       * 9. 所有 UI 控制項事件綁定
+       * ============================================================================
+       */
+      document.getElementById('btn-toggle-panels').addEventListener('click', (e) => {
+        state.panelsVisible = !state.panelsVisible;
+        const leftP = document.getElementById('left-panel');
+        const rightP = document.getElementById('right-panel');
+        if (state.panelsVisible) {
+          leftP.style.transform = 'translateX(0)';
+          rightP.style.transform = 'translateX(0)';
+          e.currentTarget.textContent = '收合面板';
+        } else {
+          leftP.style.transform = 'translateX(-120%)';
+          rightP.style.transform = 'translateX(120%)';
+          e.currentTarget.textContent = '展開面板';
+        }
+      });
+
+      document.getElementById('btn-432').addEventListener('click', () => {
+        state.baseA4 = 432;
+        document.getElementById('btn-432').className = 'px-2.5 py-1 text-xs font-mono font-bold bg-amber-500/30 text-amber-200 transition';
+        document.getElementById('btn-440').className = 'px-2.5 py-1 text-xs font-mono font-bold bg-slate-900 text-slate-400 hover:text-white transition';
+        detectMerkabaCollisions();
+        showToast('已切換為宇宙自然共鳴基準：A4 = 432 Hz');
+      });
+
+      document.getElementById('btn-440').addEventListener('click', () => {
+        state.baseA4 = 440;
+        document.getElementById('btn-440').className = 'px-2.5 py-1 text-xs font-mono font-bold bg-amber-500/30 text-amber-200 transition';
+        document.getElementById('btn-432').className = 'px-2.5 py-1 text-xs font-mono font-bold bg-slate-900 text-slate-400 hover:text-white transition';
+        detectMerkabaCollisions();
+        showToast('已切換為現代標準音高基準：A4 = 440 Hz');
+      });
+
+      document.getElementById('btn-spiral-chromatic').addEventListener('click', () => {
+        state.spiralMode = 'chromatic';
+        document.getElementById('btn-spiral-chromatic').className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 transition';
+        document.getElementById('btn-spiral-fifths').className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition';
+        clearTrajectoryTrail();
+        buildHexMatrix();
+        buildMetatronCube();
+        showToast('已切換為：半音階螺旋 (+1 半音)');
+      });
+
+      document.getElementById('btn-spiral-fifths').addEventListener('click', () => {
+        state.spiralMode = 'fifths';
+        document.getElementById('btn-spiral-fifths').className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 transition';
+        document.getElementById('btn-spiral-chromatic').className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition';
+        clearTrajectoryTrail();
+        buildHexMatrix();
+        buildMetatronCube();
+        showToast('已切換為：五度圈螺旋 (+7 半音)');
+      });
+
+      document.getElementById('select-root').addEventListener('change', (e) => {
+        state.rootOffset = parseInt(e.target.value, 10);
+        clearTrajectoryTrail();
+        buildHexMatrix();
+        buildMetatronCube();
+        showToast(`中心起始根音已設為 ${SHARP_NOTES[state.rootOffset]}`);
+      });
+
+      document.querySelectorAll('.topo-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.topology = btn.dataset.topo;
+          document.querySelectorAll('.topo-btn').forEach((b) => {
+            b.className = 'topo-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white transition';
+          });
+          btn.className = 'topo-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-amber-500/30 text-amber-200 border border-amber-400/50 transition';
+          updateTopologyPositions();
+        });
+      });
+
+      document.getElementById('slider-morph').addEventListener('input', (e) => {
+        state.morphTension = parseFloat(e.target.value);
+        document.getElementById('val-morph').textContent = `${Math.round(state.morphTension * 100)}%`;
+        updateTopologyPositions();
+      });
+
+      // 梅爾卡巴控制
+      document.getElementById('chk-merkaba-visible').addEventListener('change', (e) => {
+        state.merkabaVisible = e.target.checked;
+        applyMerkabaTransforms();
+      });
+
+      document.getElementById('slider-merkaba-scale').addEventListener('input', (e) => {
+        state.merkabaScale = parseFloat(e.target.value);
+        document.getElementById('val-merkaba-scale').textContent = `${state.merkabaScale.toFixed(2)}x`;
+        applyMerkabaTransforms();
+      });
+
+      document.getElementById('slider-merkaba-azimuth').addEventListener('input', (e) => {
+        state.merkabaAzimuthDeg = parseInt(e.target.value, 10);
+        document.getElementById('val-merkaba-azimuth').textContent = `${state.merkabaAzimuthDeg}°`;
+        applyMerkabaTransforms();
+      });
+
+      document.getElementById('slider-merkaba-elevation').addEventListener('input', (e) => {
+        state.merkabaElevationDeg = parseInt(e.target.value, 10);
+        document.getElementById('val-merkaba-elevation').textContent = `${state.merkabaElevationDeg}°`;
+        applyMerkabaTransforms();
+      });
+
+      document.getElementById('slider-merkaba-twist').addEventListener('input', (e) => {
+        state.merkabaTwistDeg = parseInt(e.target.value, 10);
+        document.getElementById('val-merkaba-twist').textContent = `${state.merkabaTwistDeg}°`;
+        applyMerkabaTransforms();
+      });
+
+      document.getElementById('btn-merkaba-spin').addEventListener('click', (e) => {
+        state.merkabaAutoSpin = !state.merkabaAutoSpin;
+        e.currentTarget.textContent = state.merkabaAutoSpin ? '↻ 自動旋轉：開' : '↻ 自動旋轉：關';
+        e.currentTarget.className = state.merkabaAutoSpin
+          ? 'py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-amber-500/25 text-amber-200 border border-amber-400/50 transition'
+          : 'py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-600/60 transition';
+      });
+
+      document.getElementById('btn-merkaba-reset').addEventListener('click', () => {
+        state.merkabaAutoSpin = false;
+        state.merkabaAzimuthDeg = 0;
+        state.merkabaElevationDeg = 0;
+        state.merkabaTwistDeg = 0;
+        state.merkabaScale = 1.0;
+
+        document.getElementById('slider-merkaba-azimuth').value = 0;
+        document.getElementById('val-merkaba-azimuth').textContent = '0°';
+        document.getElementById('slider-merkaba-elevation').value = 0;
+        document.getElementById('val-merkaba-elevation').textContent = '0°';
+        document.getElementById('slider-merkaba-twist').value = 0;
+        document.getElementById('val-merkaba-twist').textContent = '0°';
+        document.getElementById('slider-merkaba-scale').value = 1.0;
+        document.getElementById('val-merkaba-scale').textContent = '1.00x';
+
+        const spinBtn = document.getElementById('btn-merkaba-spin');
+        spinBtn.textContent = '↻ 自動旋轉：關';
+        spinBtn.className = 'py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-600/60 transition';
+
+        applyMerkabaTransforms();
+        showToast('梅爾卡巴三軸角度已重置並保持靜止');
+      });
+
+      document.getElementById('btn-merkaba-arp').addEventListener('click', playMerkabaVerticesArpeggio);
+
+      // 梅塔特隆立方體控制
+      document.getElementById('chk-metatron-visible').addEventListener('change', (e) => {
+        state.metatronVisible = e.target.checked;
+        applyMetatronTransforms();
+      });
+
+      document.getElementById('chk-metatron-wires').addEventListener('change', (e) => {
+        state.metatronWiresVisible = e.target.checked;
+        applyMetatronTransforms();
+      });
+
+      document.getElementById('slider-metatron-scale').addEventListener('input', (e) => {
+        state.metatronScale = parseFloat(e.target.value);
+        document.getElementById('val-metatron-scale').textContent = `${state.metatronScale.toFixed(2)}x`;
+        applyMetatronTransforms();
+      });
+
+      document.getElementById('slider-metatron-height').addEventListener('input', (e) => {
+        state.metatronHeight = parseFloat(e.target.value);
+        document.getElementById('val-metatron-height').textContent = `+${state.metatronHeight.toFixed(1)}`;
+        applyMetatronTransforms();
+      });
+
+      document.getElementById('slider-metatron-rot').addEventListener('input', (e) => {
+        state.metatronRotDeg = parseInt(e.target.value, 10);
+        document.getElementById('val-metatron-rot').textContent = `${state.metatronRotDeg}°`;
+        applyMetatronTransforms();
+      });
+
+      document.getElementById('btn-metatron-arp').addEventListener('click', playMetatronVerticesArpeggio);
+
+      // 雙軌跡獨立開關
+      document.getElementById('chk-hex-trail-visible').addEventListener('change', (e) => {
+        state.hexTrailVisible = e.target.checked;
+        trailGroup.visible = state.hexTrailVisible;
+        showToast(state.hexTrailVisible ? '已顯示：六角星盤軌跡' : '已隱藏：六角星盤軌跡');
+      });
+
+      document.getElementById('chk-metatron-trail-visible').addEventListener('change', (e) => {
+        state.metatronTrailVisible = e.target.checked;
+        metatronTrailGroup.visible = state.metatronTrailVisible;
+        showToast(state.metatronTrailVisible ? '已顯示：梅塔特隆 12 頂點軌跡' : '已隱藏：梅塔特隆 12 頂點軌跡');
+      });
+
+      // 軌跡保留模式、輝度與粗細
+      const btnTrailPersist = document.getElementById('btn-trail-persist');
+      const btnTrailFade = document.getElementById('btn-trail-fade');
+
+      btnTrailPersist.addEventListener('click', () => {
+        state.trailMode = 'persist';
+        btnTrailPersist.className = 'py-1.5 px-2 rounded-lg text-[11px] font-bold bg-gradient-to-r from-amber-500/30 to-cyan-500/30 text-amber-200 border border-amber-400/50 transition';
+        btnTrailFade.className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white transition';
+        trailRecords.forEach((r) => { r.material.opacity = state.trailOpacity; });
+        trailGroup.children.forEach((c) => {
+          if (c.userData && c.userData.isNodeDot) c.material.opacity = state.trailOpacity;
+        });
+        metatronTrailRecords.forEach((r) => { r.material.opacity = state.trailOpacity; });
+        metatronTrailGroup.children.forEach((c) => {
+          if (c.userData && c.userData.isMetatronDot) c.material.opacity = state.trailOpacity;
+        });
+        showToast('已啟用：保留整首樂曲雙層幾何軌跡');
+      });
+
+      btnTrailFade.addEventListener('click', () => {
+        state.trailMode = 'fade';
+        btnTrailFade.className = 'py-1.5 px-2 rounded-lg text-[11px] font-bold bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 transition';
+        btnTrailPersist.className = 'py-1.5 px-2 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white transition';
+        showToast('已切換為：即時消散模式');
+      });
+
+      document.getElementById('slider-trail-thickness').addEventListener('input', (e) => {
+        state.trailThickness = parseFloat(e.target.value);
+        document.getElementById('val-trail-thickness').textContent = `${state.trailThickness.toFixed(1)}x`;
+        rebuildTrajectoryPositions();
+        rebuildMetatronTrajectoryPositions();
+      });
+
+      document.getElementById('slider-trail-opacity').addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        state.trailOpacity = val / 100;
+        document.getElementById('val-trail-opacity').textContent = `${val}%`;
+        if (state.trailMode === 'persist') {
+          trailRecords.forEach((r) => { r.material.opacity = state.trailOpacity; });
+          trailGroup.children.forEach((c) => {
+            if (c.userData && c.userData.isNodeDot) c.material.opacity = state.trailOpacity;
+          });
+          metatronTrailRecords.forEach((r) => { r.material.opacity = state.trailOpacity; });
+          metatronTrailGroup.children.forEach((c) => {
+            if (c.userData && c.userData.isMetatronDot) c.material.opacity = state.trailOpacity;
+          });
+        }
+      });
+
+      document.getElementById('btn-clear-trail').addEventListener('click', () => {
+        clearTrajectoryTrail();
+        showToast('已清除畫布上的雙層幾何軌跡圖騰');
+      });
+
+      document.getElementById('chk-octave-res').addEventListener('change', (e) => {
+        state.octaveResonance = e.target.checked;
+      });
+
+      document.getElementById('chk-show-labels').addEventListener('change', (e) => {
+        state.showLabels = e.target.checked;
+        hexCells.forEach((c) => { c.labelSprite.visible = state.showLabels; });
+      });
+
+      document.getElementById('btn-reset-camera').addEventListener('click', () => {
+        camera.position.set(0, 22, 21);
+        controls.target.set(0, 0, 0);
+        controls.update();
+      });
+
+      document.getElementById('select-preset-midi').addEventListener('change', (e) => {
+        const key = e.target.value;
+        const titles = {
+          bach: '巴赫 C 大調前奏曲 BWV 846',
+          pentatonic: '432Hz 五聲音階神聖幾何冥想',
+          merkaba12: '梅爾卡巴十二音階對稱琶音'
+        };
+        loadMidiData(buildPresetMidi(key), titles[key]);
+      });
+
+      document.getElementById('input-midi-file').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const parsed = parseStandardMidi(ev.target.result);
+            loadMidiData(parsed, file.name);
+            showToast(`成功解析 MIDI 檔：${file.name} (${parsed.events.length} 個音符)`);
+          } catch (err) {
+            showToast(`MIDI 解析失敗：${err.message}`);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+      document.getElementById('btn-play').addEventListener('click', playMidiPlayback);
+      document.getElementById('btn-pause').addEventListener('click', pauseMidiPlayback);
+      document.getElementById('btn-stop').addEventListener('click', stopMidiPlayback);
+
+      document.getElementById('slider-progress').addEventListener('input', (e) => {
+        if (!state.totalDurationSec) return;
+        const ratio = parseInt(e.target.value, 10) / 1000;
+        state.currentTimeSec = ratio * state.totalDurationSec;
+        nextEventIndex = state.midiEvents.findIndex((ev) => ev.timeSec >= state.currentTimeSec);
+        if (nextEventIndex === -1) nextEventIndex = state.midiEvents.length;
+        document.getElementById('time-current').textContent = formatTime(state.currentTimeSec);
+      });
+
+      document.getElementById('select-timbre').addEventListener('change', (e) => {
+        state.timbre = e.target.value;
+      });
+
+      document.getElementById('select-speed').addEventListener('change', (e) => {
+        state.playbackSpeed = parseFloat(e.target.value);
+      });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      /**
+       * ============================================================================
+       * 10. 主動畫渲染迴圈
+       * ============================================================================
+       */
+      let lastFrameTime = performance.now();
+
+      function animate(now) {
+        requestAnimationFrame(animate);
+        const dtSec = Math.min(0.1, (now - lastFrameTime) / 1000);
+        lastFrameTime = now;
+
+        // 1. MIDI 樂曲排程推進
+        if (state.isPlaying && state.midiEvents.length > 0) {
+          state.currentTimeSec += dtSec * state.playbackSpeed;
+
+          while (
+            nextEventIndex < state.midiEvents.length &&
+            state.midiEvents[nextEventIndex].timeSec <= state.currentTimeSec
+          ) {
+            const ev = state.midiEvents[nextEventIndex];
+            triggerVisualAndAudioNote(
+              ev.midi,
+              ev.durationSec / state.playbackSpeed,
+              ev.velocity,
+              'MID曲目'
+            );
+            nextEventIndex++;
+          }
+
+          const progressRatio = Math.min(1, state.currentTimeSec / state.totalDurationSec);
+          document.getElementById('slider-progress').value = Math.round(progressRatio * 1000);
+          document.getElementById('time-current').textContent = formatTime(state.currentTimeSec);
+
+          if (state.currentTimeSec >= state.totalDurationSec) {
+            state.isPlaying = false;
+            showToast('整首 MIDI 樂曲演奏完成，雙層幾何軌跡已完整保留！');
+          }
+        }
+
+        // 2. 梅爾卡巴自動旋轉 (預設為 false 完全靜止)
+        if (state.merkabaAutoSpin) {
+          state.merkabaAzimuthDeg = (state.merkabaAzimuthDeg + dtSec * 24) % 360;
+          const azInt = Math.round(state.merkabaAzimuthDeg);
+          document.getElementById('slider-merkaba-azimuth').value = azInt;
+          document.getElementById('val-merkaba-azimuth').textContent = `${azInt}°`;
+          applyMerkabaTransforms();
+        }
+
+        // 3. 若為「即時消散」模式，隨時間淡出雙層軌跡光管與節點
+        if (state.trailMode === 'fade' && (trailRecords.length > 0 || metatronTrailRecords.length > 0)) {
+          for (let i = trailRecords.length - 1; i >= 0; i--) {
+            const rec = trailRecords[i];
+            const age = (now - rec.createdAt) / 1000;
+            if (age > 1.3) {
+              rec.line.geometry.dispose();
+              rec.material.dispose();
+              trailGroup.remove(rec.line);
+              trailRecords.splice(i, 1);
+              updateTrailCountBadge();
+            } else {
+              rec.material.opacity = state.trailOpacity * (1 - age / 1.3);
+            }
+          }
+          for (let i = trailGroup.children.length - 1; i >= 0; i--) {
+            const child = trailGroup.children[i];
+            if (child.userData && child.userData.isNodeDot) {
+              const age = (now - child.userData.createdAt) / 1000;
+              if (age > 1.3) {
+                child.geometry.dispose();
+                child.material.dispose();
+                trailGroup.remove(child);
+              } else {
+                child.material.opacity = state.trailOpacity * (1 - age / 1.3);
+              }
+            }
+          }
+
+          for (let i = metatronTrailRecords.length - 1; i >= 0; i--) {
+            const rec = metatronTrailRecords[i];
+            const age = (now - rec.createdAt) / 1000;
+            if (age > 1.3) {
+              rec.line.geometry.dispose();
+              rec.material.dispose();
+              metatronTrailGroup.remove(rec.line);
+              metatronTrailRecords.splice(i, 1);
+              updateTrailCountBadge();
+            } else {
+              rec.material.opacity = state.trailOpacity * (1 - age / 1.3);
+            }
+          }
+          for (let i = metatronTrailGroup.children.length - 1; i >= 0; i--) {
+            const child = metatronTrailGroup.children[i];
+            if (child.userData && child.userData.isMetatronDot) {
+              const age = (now - child.userData.createdAt) / 1000;
+              if (age > 1.3) {
+                child.geometry.dispose();
+                child.material.dispose();
+                metatronTrailGroup.remove(child);
+              } else {
+                child.material.opacity = state.trailOpacity * (1 - age / 1.3);
+              }
+            }
+          }
+        }
+
+        // 4. 更新六角星盤節點脈衝發光與彈性高度
+        for (let i = 0; i < hexCells.length; i++) {
+          const cell = hexCells[i];
+          if (cell.pulseEnergy > 0.001) {
+            cell.pulseEnergy *= Math.pow(0.06, dtSec);
+          } else {
+            cell.pulseEnergy = 0;
+          }
+
+          const highlightBoost = cell.merkabaHighlight ? 0.38 : 0;
+          cell.mesh.material.emissiveIntensity = 0.14 + cell.pulseEnergy * 1.25 + highlightBoost;
+          cell.wireMat.opacity = 0.3 + cell.pulseEnergy * 0.7 + (cell.merkabaHighlight ? 0.45 : 0);
+
+          const liftY = cell.pulseEnergy * 0.35 + (cell.merkabaHighlight ? 0.14 : 0);
+          cell.mesh.position.y = cell.basePos.y + liftY;
+          cell.labelSprite.position.y = cell.basePos.y + 0.36 + liftY;
+        }
+
+        // 5. 更新梅塔特隆 12 頂點脈衝縮放
+        for (let i = 0; i < metatronNodes.length; i++) {
+          const mNode = metatronNodes[i];
+          if (mNode.pulseEnergy > 0.001) {
+            mNode.pulseEnergy *= Math.pow(0.05, dtSec);
+          } else {
+            mNode.pulseEnergy = 0;
+          }
+          mNode.mesh.material.emissiveIntensity = 0.38 + mNode.pulseEnergy * 1.5;
+          const s = 1 + mNode.pulseEnergy * 0.48;
+          mNode.mesh.scale.set(s, s, s);
+        }
+
+        // 6. 中央神聖空六邊形微光呼吸
+        const pulseScale = 1 + Math.sin(now * 0.0025) * 0.04;
+        centerVoidMesh.scale.set(pulseScale, pulseScale, 1);
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      // 立即執行初始化與主迴圈
+      function boot() {
+        try {
+          buildHexMatrix();
+          buildMerkaba3D();
+          buildMetatronCube();
+          applyMerkabaTransforms();
+          loadMidiData(buildPresetMidi('bach'), '巴赫 C 大調前奏曲 BWV 846');
+          lastFrameTime = performance.now();
+          requestAnimationFrame(animate);
+        } catch (err) {
+          console.error('Initialization error:', err);
+          showToast(`初始化異常：${err.message}`);
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+      } else {
+        boot();
+      }
+    })();
+  </script>
+</body>
+</html>

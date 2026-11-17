@@ -1,0 +1,1592 @@
+﻿<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Sacred Lattice — 5 Views</title>
+<style>
+  :root{
+    --bg:#05070c;--panel:rgba(11,17,26,.9);--fg:#dce7f5;--dim:#7e91a8;
+    --accent:#7fd7ff;--gold:#ffcc66;--violet:#b48cff;--green:#7fffb0;--line:#1a2432;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--fg);overflow:hidden;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  canvas{display:block;position:fixed;inset:0;width:100%;height:100%;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+  #panel{position:fixed;right:0;top:0;bottom:0;width:320px;background:var(--panel);
+    backdrop-filter:blur(14px);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;z-index:20;
+    transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  #panel.collapsed{transform:translateX(100%)}
+  #scroll{overflow-y:auto;padding:14px;flex:1;font-size:12px;line-height:1.6}
+  #scroll::-webkit-scrollbar{width:6px}
+  #scroll::-webkit-scrollbar-thumb{background:#24344a;border-radius:3px}
+  #toggle{position:fixed;right:320px;top:14px;z-index:21;width:24px;height:34px;
+    background:var(--panel);border:1px solid var(--line);border-right:none;
+    border-radius:6px 0 0 6px;color:var(--dim);cursor:pointer;
+    transition:right .3s cubic-bezier(.4,0,.2,1)}
+  #panel.collapsed~#toggle{right:0}
+  h1{font-size:12px;letter-spacing:.1em;color:var(--accent);font-weight:600}
+  .sub{font-size:10px;color:var(--dim);margin-bottom:12px}
+  h2{font-size:11px;letter-spacing:.06em;color:#607694;margin:15px 0 5px;
+    border-top:1px solid var(--line);padding-top:8px;font-weight:600}
+  label{display:block;color:#8fa3bb;margin:7px 0 2px;font-size:11px}
+  input[type=file]{width:100%;font-size:10px;color:#9ab}
+  input[type=range]{width:100%;height:3px;-webkit-appearance:none;background:#1d2a3a;
+    border-radius:2px;outline:none;margin:6px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+    border-radius:50%;background:var(--accent);cursor:pointer;
+    box-shadow:0 0 8px rgba(127,215,255,.8)}
+  button{background:#111b26;color:var(--fg);border:1px solid #22303f;border-radius:5px;
+    padding:7px 4px;font-family:inherit;font-size:11px;cursor:pointer;transition:.15s}
+  button:hover{background:#182636;border-color:#33506e}
+  button.active{background:#12283c;border-color:var(--accent);color:var(--accent);
+    box-shadow:inset 0 0 12px rgba(127,215,255,.14)}
+  .row{display:flex;gap:5px;margin:5px 0}.row>*{flex:1}
+  .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:5px 0}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:5px 0}
+  .wide{width:100%;margin:5px 0}
+  .readout{background:#0a121b;border:1px solid var(--line);border-radius:5px;
+    padding:8px 10px;margin:6px 0;font-size:11px}
+  .readout div{display:flex;justify-content:space-between;padding:1px 0}
+  .readout b{color:var(--accent);font-weight:500}
+  .chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+  .chip{padding:2px 6px;border-radius:3px;background:#131f2c;font-size:10px;
+    color:#8aa;transition:.25s}
+  .chip.on{background:#1f3a2a;color:#ffe0a0;box-shadow:0 0 8px rgba(255,210,120,.35)}
+  .legend{font-size:10px;color:var(--dim);line-height:1.9;margin-top:6px}
+  .sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;
+    vertical-align:middle}
+  #transport{position:fixed;left:0;right:320px;bottom:0;z-index:19;
+    background:linear-gradient(180deg,rgba(8,12,18,.55),rgba(5,7,12,.97));
+    border-top:1px solid var(--line);padding:10px 16px 12px;
+    transition:right .3s cubic-bezier(.4,0,.2,1)}
+  #panel.collapsed~#transport{right:0}
+  #trow{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+  #trow button{padding:7px 14px;min-width:44px}
+  #time{font-size:11px;color:var(--dim);min-width:100px;text-align:center}
+  #speeds{display:flex;gap:3px;margin-left:auto}
+  #speeds button{padding:4px 7px;font-size:10px;min-width:auto}
+  #seek{width:100%;height:4px;-webkit-appearance:none;background:#16212e;
+    border-radius:2px;outline:none;cursor:pointer}
+  #seek::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;
+    border-radius:50%;background:var(--gold);box-shadow:0 0 10px rgba(255,204,102,.9);
+    cursor:pointer}
+  #hud{position:fixed;left:14px;top:14px;font-size:11px;color:#6b7f96;
+    pointer-events:none;line-height:1.7;white-space:pre;text-shadow:0 0 8px #000;z-index:18}
+  #trace{position:fixed;left:14px;bottom:80px;width:320px;max-height:170px;
+    overflow-y:auto;font-size:10px;color:#5d7089;line-height:1.7;
+    pointer-events:none;text-shadow:0 0 8px #000;z-index:18}
+  #trace div{opacity:.55}
+  #trace div:last-child{opacity:1;color:var(--gold)}
+  #toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);
+    background:rgba(127,215,255,.12);border:1px solid rgba(127,215,255,.4);
+    color:var(--accent);padding:7px 18px;border-radius:20px;font-size:11px;
+    z-index:30;opacity:0;transition:opacity .3s;pointer-events:none}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<canvas id="cv"></canvas>
+
+<aside id="panel">
+  <div id="scroll">
+    <h1>✡ SACRED LATTICE · 5 VIEWS</h1>
+    <div class="sub">MERKABA · METATRON · DISC · CIRCLE · TONNETZ</div>
+
+    <div class="readout">
+      <div><span>當前觸發</span><b id="roNote">待命 (C4)</b></div>
+      <div><span>物理頻率</span><b id="roFreq">261.63 Hz</b></div>
+      <div><span>拓撲座標</span><b id="roCoord">環 1 · #1</b></div>
+    </div>
+
+    <h2>MIDI 來源</h2>
+    <input type="file" id="midiFile" accept=".mid,.midi">
+    <button class="wide" id="demo1">示範 1：巴哈 C 大調前奏曲</button>
+    <button class="wide" id="demo2">示範 2：432Hz 五聲冥想</button>
+    <button class="wide" id="demo3">示範 3：十二音對稱琶音</button>
+
+    <h2>幾何視圖</h2>
+    <div class="g2">
+      <button id="vMerkaba" class="active">梅卡巴 8頂</button>
+      <button id="vMetatron">梅塔特隆 13頂</button>
+      <button id="vDisc">六角星盤</button>
+      <button id="vCircle">音級環</button>
+    </div>
+    <button class="wide" id="vTonnetz">Tonnetz 和聲網</button>
+    <div class="g3" style="margin:5px 0">
+      <button id="cBoth" class="active">雙環</button>
+      <button id="cInner">只看半音</button>
+      <button id="cOuter">只看五度</button>
+    </div>
+
+    <h2>視角</h2>
+    <label>方位角 <span id="azVal">0°</span></label>
+    <input type="range" id="az" min="-180" max="180" value="0">
+    <label>俯仰角 <span id="elVal">18°</span></label>
+    <input type="range" id="el" min="-85" max="85" value="18">
+    <label>縮放（統一） <span id="zoomVal">1.00×</span></label>
+    <input type="range" id="zoom" min="40" max="260" value="100">
+    <div class="g2">
+      <button id="autoRot">↻ 自動旋轉</button>
+      <button id="resetCam">⟲ 重置視角</button>
+    </div>
+
+    <h2>音律</h2>
+    <div class="g2">
+      <button id="base432">432 Hz</button>
+      <button id="base440" class="active">440 Hz</button>
+    </div>
+    <label>中心根音</label>
+    <div class="g3" id="rootBtns"></div>
+    <label>六角外擴規律</label>
+    <div class="g2">
+      <button id="spChromatic" class="active">半音 +1</button>
+      <button id="spFifths">五度 +7</button>
+    </div>
+    <label>星盤環數 <span id="ringVal">5</span></label>
+    <input type="range" id="ringCount" min="3" max="7" value="5">
+
+    <h2>軌跡</h2>
+    <div class="g2">
+      <button id="modeKeep" class="active">保留整首</button>
+      <button id="modeFade">即時消散</button>
+    </div>
+    <label>光管管徑 <span id="twVal">2.0×</span></label>
+    <input type="range" id="tw" min="5" max="60" value="20">
+    <label>連線輝度 <span id="glowVal">88%</span></label>
+    <input type="range" id="glow" min="0" max="100" value="88">
+    <button class="wide" id="clearTrail">清除所有軌跡</button>
+
+    <h2>顯示</h2>
+    <div class="g2">
+      <button id="tOctal" class="active">八度泛音</button>
+      <button id="tLabels" class="active">音名標籤</button>
+    </div>
+
+    <h2>音色</h2>
+    <div class="g3">
+      <button id="tCrystal" class="active">水晶缽</button>
+      <button id="tTri">三角波</button>
+      <button id="tStrings">空靈弦</button>
+    </div>
+    <label>音量 <span id="volVal">55%</span></label>
+    <input type="range" id="vol" min="0" max="100" value="55">
+
+    <h2>目前音高</h2>
+    <div class="chips" id="chips"></div>
+
+    <div class="legend">
+      <span class="sw" style="background:#ffcc66"></span>旋律光管<br>
+      <span class="sw" style="background:#b48cff"></span>和弦光管<br>
+      <span class="sw" style="background:#7fffb0"></span>梅塔特隆跳躍
+    </div>
+  </div>
+</aside>
+<button id="toggle">›</button>
+
+<div id="hud"></div>
+<div id="trace"></div>
+<div id="toast"></div>
+
+<div id="transport">
+  <div id="trow">
+    <button id="playBtn">▶</button>
+    <button id="pauseBtn">⏸</button>
+    <button id="stopBtn">⏹</button>
+    <span id="time">00:00 / 00:00</span>
+    <div id="speeds">
+      <button data-s="0.5">0.5×</button>
+      <button data-s="0.75">0.75×</button>
+      <button data-s="1" class="active">1×</button>
+      <button data-s="1.25">1.25×</button>
+      <button data-s="1.5">1.5×</button>
+      <button data-s="2">2×</button>
+    </div>
+  </div>
+  <input type="range" id="seek" min="0" max="1000" value="0">
+</div>
+
+<script src="https://unpkg.com/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script>
+'use strict';
+
+/* ============================================================
+   §1 全域狀態
+   ============================================================ */
+const PC = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const TAU = Math.PI*2, SQ3 = Math.sqrt(3);
+
+let mode = 'merkaba';
+let circleMode = 'both';   // 'both' | 'inner' | 'outer'
+let baseA4 = 440;
+let rootPC = 0;
+let spiral = 1;
+let trailMode = 'keep';
+let showOctal = true, showLabels = true;
+let timbre = 'crystal';
+let ringCount = 5;
+
+const cam = { az:0, el:18*Math.PI/180, autoRot:false };
+const MOUSE = { down:false, x:0, y:0, az0:0, el0:0, moved:false };
+
+const CLK = { events:[], dur:0, playing:false, startWall:0, startPos:0, speed:1, idx:0 };
+let nowSec = 0;
+let activeNotes = [];
+let starTrail = [], metaTrail = [];
+
+/* ============================================================
+   §2 音高工具
+   ============================================================ */
+function pcOf(m){ return ((m%12)+12)%12; }
+function nameOf(m){ return PC[pcOf(m)] + (Math.floor(m/12)-1); }
+function freq(m){ return baseA4 * Math.pow(2, (m-69)/12); }
+
+/* ============================================================
+   §3 六角格（cube 座標）
+   ============================================================ */
+const HEX_R = 1.0;
+function ringNodes(rad){
+  if(rad===0) return [{q:0,r:0,step:0}];
+  const out=[];
+  const dirs=[[-1,1],[-1,0],[0,-1],[1,-1],[1,0],[0,1]];
+  let q=rad, r=0, step=0;
+  for(let side=0; side<6; side++){
+    for(let k=0; k<rad; k++){
+      out.push({q, r, step});
+      q+=dirs[side][0]; r+=dirs[side][1]; step++;
+    }
+  }
+  return out;
+}
+function hexXYZ(q,r,layer){
+  return { x: HEX_R*1.5*q, y: layer*0.42, z: HEX_R*SQ3*(r+q/2) };
+}
+function buildNodes(maxRing){
+  const nodes=[];
+  for(let rad=0; rad<=maxRing; rad++){
+    const rn = ringNodes(rad);
+    for(const n of rn){
+      const pc = ((rad*spiral + n.step + rootPC)%12+12)%12;
+      const p = hexXYZ(n.q, n.r, rad);
+      nodes.push({ring:rad, step:n.step, q:n.q, r:n.r, pc, ...p});
+    }
+  }
+  return nodes;
+}
+let NODES = buildNodes(ringCount);
+let NODE_IDX = new Map();
+function indexNodes(){
+  NODE_IDX.clear();
+  NODES.forEach((n,i)=>{
+    const k = `${n.pc}_${n.ring}`;
+    if(!NODE_IDX.has(k)) NODE_IDX.set(k, []);
+    NODE_IDX.get(k).push(i);
+  });
+}
+indexNodes();
+
+/* ============================================================
+   §4 統一投影架構
+   所有視圖都先算出「原始投影點」，再呼叫 fitToCanvas() 統一配平
+   ============================================================ */
+let W=0,H=0,DPR=1,CX=0,CY=0;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+function resizeCanvas(){
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  CX = W/2; CY = H/2 + 10;
+}
+
+function rot3(p, az, el){
+  let [x,y,z]=p;
+  let c=Math.cos(az), s=Math.sin(az);
+  [x,z]=[x*c-z*s, x*s+z*c];
+  c=Math.cos(el); s=Math.sin(el);
+  [y,z]=[y*c-z*s, y*s+z*c];
+  return [x,y,z];
+}
+
+/* 透視投影：以畫面中心為原點，回傳相對座標 */
+function projRaw(p){
+  const [x,y,z]=p;
+  const camZ = 5.6;
+  const zz = z + camZ;
+  const f = 520 / Math.max(0.2, zz);
+  return { x: x*f, y: y*f, d: zz };
+}
+
+/* 統一配平：給定一組原始點，算出縮放後落點
+   padding 決定目標最大半徑占畫布的比例                     */
+function fitToCanvas(rawPts, padding){
+  let maxR = 1;
+  rawPts.forEach(p=>{
+    maxR = Math.max(maxR, Math.abs(p.x), Math.abs(p.y));
+  });
+  const target = Math.min(W, H*1.38) * padding;
+  const k = target / maxR;
+  const zf = (+document.getElementById('zoom').value/100);
+  const s = k * zf;
+  return {
+    k: s,
+    map: p => ({ x: CX + p.x*s, y: (H/2) + p.y*s, d: p.d })
+  };
+}
+
+/* ============================================================
+   §5 音訊
+   ============================================================ */
+let AC=null, MASTER=null, REVERB=null;
+function audioInit(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  MASTER = AC.createGain();
+  MASTER.gain.value = (+document.getElementById('vol').value/100)*0.55;
+  REVERB = AC.createConvolver();
+  const len = Math.floor(AC.sampleRate*1.9);
+  const ir = AC.createBuffer(2, len, AC.sampleRate);
+  for(let ch=0; ch<2; ch++){
+    const d = ir.getChannelData(ch);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.7)*0.5;
+  }
+  REVERB.buffer = ir;
+  const wet = AC.createGain(); wet.gain.value = 0.34;
+  REVERB.connect(wet); wet.connect(MASTER);
+  MASTER.connect(AC.destination);
+}
+function voice(midi, t0, dur, vel){
+  audioInit();
+  const f = freq(midi);
+  const g = AC.createGain();
+  const pan = AC.createStereoPanner();
+  pan.pan.value = Math.max(-1, Math.min(1, (pcOf(midi)-5.5)/6.5));
+
+  if(timbre==='crystal'){
+    [[1,1],[2.01,0.46],[3.02,0.24],[4.97,0.12]].forEach(([mul,amp])=>{
+      const o=AC.createOscillator(); o.type='sine'; o.frequency.value=f*mul;
+      const og=AC.createGain(); og.gain.value=amp*vel*0.17;
+      o.connect(og); og.connect(g);
+      o.start(t0); o.stop(t0+dur+2.4);
+    });
+    g.gain.setValueAtTime(0,t0);
+    g.gain.linearRampToValueAtTime(1, t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0006, t0+dur+2.2);
+  } else if(timbre==='tri'){
+    const o=AC.createOscillator(); o.type='triangle'; o.frequency.value=f;
+    const o2=AC.createOscillator(); o2.type='sine'; o2.frequency.value=f*2;
+    const g2=AC.createGain(); g2.gain.value=0.24;
+    o.connect(g); o2.connect(g2); g2.connect(g);
+    g.gain.setValueAtTime(0,t0);
+    g.gain.linearRampToValueAtTime(vel*0.32, t0+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0008, t0+dur+0.5);
+    o.start(t0); o2.start(t0); o.stop(t0+dur+0.6); o2.stop(t0+dur+0.6);
+  } else {
+    const o=AC.createOscillator(); o.type='sawtooth'; o.frequency.value=f;
+    const o2=AC.createOscillator(); o2.type='sawtooth'; o2.frequency.value=f*1.004;
+    const lp=AC.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1700;
+    o.connect(lp); o2.connect(lp); lp.connect(g);
+    g.gain.setValueAtTime(0,t0);
+    g.gain.linearRampToValueAtTime(vel*0.15, t0+0.14);
+    g.gain.setValueAtTime(vel*0.15, t0+dur);
+    g.gain.exponentialRampToValueAtTime(0.0008, t0+dur+0.9);
+    o.start(t0); o2.start(t0); o.stop(t0+dur+1.0); o2.stop(t0+dur+1.0);
+  }
+  g.connect(pan); pan.connect(MASTER); pan.connect(REVERB);
+}
+
+/* ============================================================
+   §6 UI 小工具
+   ============================================================ */
+const $ = id => document.getElementById(id);
+function toast(msg){
+  const el=$('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),1500);
+}
+function pushTrace(txt){
+  const el=$('trace');
+  const d=document.createElement('div'); d.textContent=txt;
+  el.appendChild(d);
+  while(el.children.length>36) el.removeChild(el.firstChild);
+  el.scrollTop=el.scrollHeight;
+}
+
+/* ============================================================
+   §7 音符觸發
+   ============================================================ */
+const chipMap = new Map();
+function onNote(midi){
+  $('roNote').textContent = nameOf(midi);
+  $('roFreq').textContent = freq(midi).toFixed(2)+' Hz';
+  const nd = closestNode(midi);
+  $('roCoord').textContent = `環 ${nd.ring} · #${nd.step+1}`;
+
+  let c = chipMap.get(midi);
+  if(!c){
+    c = document.createElement('span'); c.className='chip';
+    $('chips').appendChild(c);
+    chipMap.set(midi,c);
+    if(chipMap.size>34){
+      const f=$('chips').firstChild;
+      if(f) $('chips').removeChild(f);
+    }
+  }
+  c.textContent = nameOf(midi);
+  c.classList.add('on');
+  setTimeout(()=>c.classList.remove('on'), 430);
+
+  pushTrace(`♪ ${nameOf(midi)}  ${freq(midi).toFixed(1)}Hz  @${nowSec.toFixed(2)}s`);
+
+  recordTrail(midi);
+
+  if(showOctal){
+    for(let o=1;o<=2;o++){
+      const hi = midi + 12*o;
+      if(hi<=108 && Math.random()>0.45){
+        setTimeout(()=>{ if(AC) voice(hi, AC.currentTime, 0.55, 0.16); }, o*45);
+      }
+    }
+  }
+}
+function closestNode(midi){
+  const pc = pcOf(midi);
+  const targetRing = Math.max(0, Math.min(ringCount, Math.floor(midi/12)-1));
+  let best=null, bd=1e9;
+  for(const n of NODES){
+    if(n.pc!==pc) continue;
+    const d = Math.abs(n.ring-targetRing)*2 + n.step*0.002;
+    if(d<bd){ bd=d; best=n; }
+  }
+  return best || NODES[0];
+}
+
+/* ============================================================
+   §8 播放時鐘
+   ============================================================ */
+function findIdxAt(sec){
+  let i=0;
+  while(i<CLK.events.length && CLK.events[i].t < sec) i++;
+  return i;
+}
+function startPlay(){
+  if(!CLK.events.length){ toast('請先載入 MIDI 或選示範曲'); return; }
+  audioInit();
+  if(AC.state==='suspended') AC.resume();
+  CLK.playing = true;
+  CLK.startWall = performance.now();
+  CLK.idx = findIdxAt(CLK.startPos);
+  activeNotes = [];
+  pushTrace('▶ 播放 @'+CLK.startPos.toFixed(2)+'s');
+}
+function pausePlay(){
+  if(!CLK.playing) return;
+  CLK.startPos = nowSec;
+  CLK.playing = false;
+  pushTrace('⏸ 暫停 @'+nowSec.toFixed(2)+'s');
+}
+function stopPlay(){
+  CLK.playing=false; CLK.startPos=0; CLK.idx=0; nowSec=0;
+  activeNotes=[];
+  pushTrace('⏹ 停止');
+}
+function seekTo(sec){
+  CLK.startPos = Math.max(0, Math.min(CLK.dur, sec));
+  nowSec = CLK.startPos;
+  CLK.idx = findIdxAt(CLK.startPos);
+  activeNotes = [];
+  if(CLK.playing) CLK.startWall = performance.now() - (CLK.startPos*1000/CLK.speed);
+  if(trailMode==='fade'){ starTrail=[]; metaTrail=[]; }
+}
+function clockTick(wallNow){
+  if(CLK.playing){
+    nowSec = CLK.startPos + (wallNow-CLK.startWall)/1000*CLK.speed;
+    if(nowSec >= CLK.dur+0.15){
+      nowSec = CLK.dur;
+      CLK.playing = false; CLK.startPos = 0; CLK.idx = 0;
+      pushTrace('✓ 播放結束');
+    }
+  }
+  while(CLK.idx < CLK.events.length && CLK.events[CLK.idx].t <= nowSec){
+    const e = CLK.events[CLK.idx++];
+    const delay = Math.max(0, e.t - nowSec)/CLK.speed;
+    if(AC) voice(e.midi, AC.currentTime+delay, e.dur/CLK.speed, e.vel);
+    activeNotes.push({midi:e.midi, t0:e.t, t1:e.t+e.dur});
+    onNote(e.midi);
+  }
+  activeNotes = activeNotes.filter(n => nowSec < n.t1+0.06);
+}
+
+/* ============================================================
+   §9 軌跡
+   ============================================================ */
+function recordTrail(midi){
+  const nd = closestNode(midi);
+  starTrail.push({midi, pc:pcOf(midi), ring:nd.ring, step:nd.step});
+  metaTrail.push(midi);
+  if(trailMode==='fade'){
+    if(starTrail.length>110) starTrail.shift();
+    if(metaTrail.length>110) metaTrail.shift();
+  }
+}
+
+/* ============================================================
+   §10 繪製工具
+   ============================================================ */
+function tubeW(){ return +$('tw').value/10; }
+function glowA(){ return +$('glow').value/100; }
+function tube(pts, rgb, wmul, amul){
+  if(pts.length<2) return;
+  const a = glowA()*(amul||1), w = tubeW()*(wmul||1);
+  ctx.lineJoin='round'; ctx.lineCap='round';
+
+  ctx.beginPath();
+  pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.strokeStyle=`rgba(${rgb},${0.09*a})`;
+  ctx.lineWidth=w*4.4; ctx.stroke();
+
+  ctx.beginPath();
+  pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.strokeStyle=`rgba(${rgb},${0.32*a})`;
+  ctx.lineWidth=w*2.0; ctx.stroke();
+
+  ctx.beginPath();
+  pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.strokeStyle=`rgba(${rgb},${0.95*a})`;
+  ctx.lineWidth=w;
+  ctx.shadowBlur=15*a; ctx.shadowColor=`rgba(${rgb},0.85)`;
+  ctx.stroke(); ctx.shadowBlur=0;
+}
+function bg(){
+  const g=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.75);
+  g.addColorStop(0,'#0c1320'); g.addColorStop(.6,'#070b12'); g.addColorStop(1,'#04060a');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(140,180,230,0.18)';
+  for(let i=0;i<100;i++) ctx.fillRect((i*137.5)%W,(i*211.7)%H,1,1);
+}
+
+/* ============================================================
+   §11 梅卡巴（8 頂點）
+   ============================================================ */
+const TET_A = [[1,1,1],[1,-1,-1],[-1,1,-1],[-1,-1,1]].map(v=>v.map(c=>c/Math.sqrt(3)));
+const TET_B = TET_A.map(v=>v.map(c=>-c));
+const MERK_PC = [0,3,6,9, 1,4,7,10];   // 8 頂點對應 8 個音級
+
+function merkabaWorld(){
+  const S = 1.0;
+  const out=[];
+  TET_A.forEach(v=>out.push({p:v.map(c=>c*S), sgn:1, idx:out.length}));
+  TET_B.forEach(v=>out.push({p:v.map(c=>c*S), sgn:-1, idx:out.length}));
+  return out;
+}
+function renderMerkaba(){
+  const verts = merkabaWorld();
+  const actPC = new Set(activeNotes.map(n=>pcOf(n.midi)));
+
+  // 世界座標 → 旋轉 → 原始投影
+  const world = verts.map(v=>rot3(v.p, cam.az, cam.el));
+  const raw = world.map(p=>projRaw(p));
+  const fit = fitToCanvas(raw, 0.30);
+  const scr = raw.map(p=>fit.map(p));
+  const S = fit.k;   // 用於深度分層
+
+  // 邊
+  const edges=[];
+  for(let i=0;i<4;i++) for(let j=i+1;j<4;j++){ edges.push([i,j]); edges.push([i+4,j+4]); }
+  for(let i=0;i<4;i++) edges.push([i,i+4]);
+
+  const zarr = world.map(p=>p[2]);
+  edges.sort((A,B)=>
+    (zarr[A[0]]+zarr[A[1]]) - (zarr[B[0]]+zarr[B[1]]));
+
+  const zMin = Math.min(...zarr), zMax = Math.max(...zarr);
+  edges.forEach(([ia,ib])=>{
+    const a=scr[ia], b=scr[ib];
+    const zAvg = (zarr[ia]+zarr[ib])/2;
+    const t = (zMax>zMin) ? (zAvg-zMin)/(zMax-zMin) : 0.5;
+    const alpha = 0.20 + t*0.75;
+    const width = 1.8 + t*4.5;
+    const sameTet = (ia<4) === (ib<4);
+
+    let col;
+    if(!sameTet) col = `rgba(255,204,102,${alpha*0.55})`;
+    else col = ia<4 ? `rgba(127,215,255,${alpha})` : `rgba(180,140,255,${alpha})`;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = width;
+    ctx.lineCap='round';
+    if(t>0.6){ ctx.shadowBlur = 14*t; ctx.shadowColor = col; }
+    ctx.stroke(); ctx.shadowBlur = 0;
+  });
+
+  /* 頂點球 */
+  scr.forEach((s, idx)=>{
+    const pc = MERK_PC[idx];
+    const hot = actPC.has(pc);
+    const rad = (hot ? 15 : 9) * Math.max(0.7, Math.min(1.6, S*0.5));
+
+    if(hot){
+      ctx.beginPath(); ctx.arc(s.x,s.y,rad*2.6,0,TAU);
+      ctx.fillStyle='rgba(255,220,140,0.14)'; ctx.fill();
+    }
+    const grad = ctx.createRadialGradient(
+      s.x - rad*0.35, s.y - rad*0.35, rad*0.1, s.x, s.y, rad);
+    const isPos = idx < 4;
+    grad.addColorStop(0, hot ? '#fff6d8' : (isPos ? '#cfeeff' : '#e2ccff'));
+    grad.addColorStop(1, hot ? '#ffae20' : (isPos ? '#2580bd' : '#6f42b5'));
+
+    ctx.beginPath(); ctx.arc(s.x, s.y, rad, 0, TAU);
+    ctx.fillStyle = grad;
+    if(hot){ ctx.shadowBlur=26; ctx.shadowColor='rgba(255,190,80,0.9)'; }
+    ctx.fill(); ctx.shadowBlur=0;
+
+    if(showLabels){
+      ctx.font = `bold ${hot?19:15}px ui-monospace,monospace`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle = hot ? '#fff2c8' : 'rgba(200,222,245,0.84)';
+      ctx.shadowBlur=8; ctx.shadowColor='#000';
+      ctx.fillText(PC[pc], s.x, s.y - rad - 14);
+      ctx.shadowBlur=0;
+    }
+  });
+
+  /* 軌跡 */
+  if(starTrail.length>1){
+    const pts=[];
+    starTrail.forEach(t=>{
+      const idx = MERK_PC.indexOf(t.pc);
+      if(idx<0) return;
+      pts.push(scr[idx]);
+    });
+    tube(pts, '255,204,102', 1.1, 1);
+  }
+}
+
+/* ============================================================
+   §12 梅塔特隆（13 頂點：中心 + 內 6 + 外 6）
+   ============================================================ */
+const META_PC = [0,2,4,6,8,10, 1,3,5,7,9,11];   // 12 頂點 → 12 音級
+/* 索引 0 = 中心（無音級），1..6 = 內圈，7..12 = 外圈 */
+function metatronWorld(){
+  const out = [{p:[0, 0, 0], part:'center', pc:-1}];
+  for(let k=0;k<6;k++){
+    const a = TAU*k/6 + Math.PI/6;
+    out.push({p:[Math.cos(a)*0.58, 0, Math.sin(a)*0.58], part:'inner', pc:META_PC[k]});
+  }
+  for(let k=0;k<6;k++){
+    const a = TAU*k/6;
+    out.push({p:[Math.cos(a)*1.0, 0, Math.sin(a)*1.0], part:'outer', pc:META_PC[k+6]});
+  }
+  return out;   // 13 個
+}
+
+/* 78 條連線：以 13 點全連 = 78 條，剛好是 C(13,2)=78 */
+const META_EDGES = (()=>{
+  const e=[];
+  for(let i=0;i<13;i++) for(let j=i+1;j<13;j++) e.push([i,j]);
+  return e;   // 78 條
+})();
+
+function renderMetatron(){
+  const verts = metatronWorld();
+  const actPC = new Set(activeNotes.map(n=>pcOf(n.midi)));
+
+  const world = verts.map(v=>rot3(v.p, cam.az, cam.el));
+  const raw = world.map(p=>projRaw(p));
+  const fit = fitToCanvas(raw, 0.32);
+  const scr = raw.map(p=>fit.map(p));
+
+  const zarr = world.map(p=>p[2]);
+  const zMin = Math.min(...zarr), zMax = Math.max(...zarr);
+
+  /* 78 條線，按深度分層 */
+  const sorted = META_EDGES.slice().sort((A,B)=>
+    (zarr[A[0]]+zarr[A[1]]) - (zarr[B[0]]+zarr[B[1]]));
+
+  sorted.forEach(([ia,ib])=>{
+    const a=scr[ia], b=scr[ib];
+    const zAvg = (zarr[ia]+zarr[ib])/2;
+    const t = (zMax>zMin) ? (zAvg-zMin)/(zMax-zMin) : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+    ctx.strokeStyle = `rgba(120,200,255,${0.05 + t*0.28})`;
+    ctx.lineWidth = 0.7 + t*1.9;
+    ctx.stroke();
+  });
+
+  /* 13 個頂點 */
+  scr.forEach((s, idx)=>{
+    const v = verts[idx];
+    const isCenter = v.part==='center';
+    const hot = !isCenter && actPC.has(v.pc);
+    const rad = isCenter ? 9 : (hot ? 14 : 8);
+
+    if(hot){
+      ctx.beginPath(); ctx.arc(s.x,s.y,rad*2.7,0,TAU);
+      ctx.fillStyle='rgba(140,255,190,0.14)'; ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(s.x,s.y,rad,0,TAU);
+    if(isCenter){
+      ctx.fillStyle = 'rgba(255,204,102,0.9)';
+    } else {
+      ctx.fillStyle = hot ? 'rgba(170,255,210,1)' : 'rgba(120,180,255,0.55)';
+    }
+    if(hot || isCenter){
+      ctx.shadowBlur = 24;
+      ctx.shadowColor = isCenter ? 'rgba(255,204,102,0.9)' : 'rgba(127,255,176,0.9)';
+    }
+    ctx.fill(); ctx.shadowBlur=0;
+
+    if(showLabels){
+      ctx.font = `bold ${hot?17:13}px ui-monospace,monospace`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle = isCenter ? '#ffeeb8'
+        : (hot ? '#e0ffe8' : 'rgba(170,205,235,0.72)');
+      ctx.shadowBlur=7; ctx.shadowColor='#000';
+      /* 中心頂點不標音名，改標「中心」 */
+      ctx.fillText(isCenter ? '◎' : PC[v.pc], s.x, s.y - rad - 12);
+      ctx.shadowBlur=0;
+    }
+  });
+
+  /* 頂點軌跡 */
+  if(metaTrail.length>1){
+    const pts=[];
+    metaTrail.forEach(m=>{
+      const pc = pcOf(m);
+      const idx = verts.findIndex(v=>!v.pc===-1 && v.pc===pc);
+      if(idx>=0) pts.push(scr[idx]);
+    });
+    tube(pts, '127,255,176', 1.0, 0.95);
+  }
+}
+
+/* ============================================================
+   §13 六角星盤（統一配平、索引軌跡）
+   ============================================================ */
+function renderDisc(){
+  const actPC = new Set(activeNotes.map(n=>pcOf(n.midi)));
+
+  const world = NODES.map(n=>rot3([n.x,n.y,n.z], cam.az, cam.el));
+  const raw = world.map(p=>projRaw(p));
+  const fit = fitToCanvas(raw, 0.40);
+  const scr = raw.map(p=>fit.map(p));
+  const scaleRef = fit.k;
+
+  /* 環內鄰接 */
+  const key = (q,r)=>q+','+r;
+  const lookup = new Map();
+  NODES.forEach((n,i)=>lookup.set(key(n.q,n.r), i));
+  const NEI = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+
+  NODES.forEach((n,i)=>{
+    NEI.forEach(([dq,dr])=>{
+      const j = lookup.get(key(n.q+dq, n.r+dr));
+      if(j===undefined || j<=i) return;
+      if(NODES[j].ring !== n.ring) return;
+      const a=scr[i], b=scr[j];
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+      ctx.strokeStyle='rgba(90,150,220,0.20)';
+      ctx.lineWidth=1; ctx.stroke();
+    });
+  });
+
+  /* 徑向線 */
+  NODES.forEach((n,i)=>{
+    if(n.ring===0) return;
+    if(n.step % n.ring !== 0) return;
+    const c=scr[0], a=scr[i];
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(c.x,c.y);
+    ctx.strokeStyle='rgba(90,150,220,0.08)';
+    ctx.lineWidth=1; ctx.stroke();
+  });
+
+  /* 節點 */
+  NODES.forEach((n,i)=>{
+    const s = scr[i];
+    const hot = actPC.has(n.pc);
+    const baseR = Math.max(2.4, 5.0 - n.ring*0.35);
+    const rad = baseR * Math.max(0.55, Math.min(1.8, scaleRef*0.55));
+
+    if(hot){
+      ctx.beginPath(); ctx.arc(s.x,s.y,rad*3.2,0,TAU);
+      ctx.fillStyle='rgba(255,210,120,0.15)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(s.x,s.y,rad,0,TAU);
+      ctx.fillStyle='rgba(255,232,162,1)';
+      ctx.shadowBlur=18; ctx.shadowColor='rgba(255,200,90,0.9)';
+      ctx.fill(); ctx.shadowBlur=0;
+    } else {
+      ctx.beginPath(); ctx.arc(s.x,s.y,rad,0,TAU);
+      ctx.fillStyle='rgba(120,180,255,0.34)'; ctx.fill();
+    }
+    if(showLabels && n.ring<=3){
+      ctx.font=`bold ${hot?16:12}px ui-monospace,monospace`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle=hot?'#fff4cc':'rgba(160,195,230,0.72)';
+      ctx.shadowBlur=6; ctx.shadowColor='#000';
+      ctx.fillText(PC[n.pc], s.x, s.y-rad-10);
+      ctx.shadowBlur=0;
+    }
+  });
+
+  /* 軌跡：索引表查找，不再線性掃全表 */
+  if(starTrail.length>1){
+    const pts=[];
+    starTrail.forEach(t=>{
+      const cands = NODE_IDX.get(`${t.pc}_${t.ring}`) || [];
+      if(!cands.length) return;
+      let best=cands[0], bd=1e9;
+      cands.forEach(i=>{
+        const d=Math.abs(NODES[i].step - t.step);
+        if(d<bd){ bd=d; best=i; }
+      });
+      pts.push(scr[best]);
+    });
+    tube(pts, '255,204,102', 1.0, 1);
+  }
+}
+
+/* ============================================================
+   §14 音級環（內環半音圈 + 外環五度圈）
+   ============================================================ */
+function pcAngle(pc){ return -Math.PI/2 + TAU*pc/12; }
+
+/* 五度圈位置：第 k 格 → 角度；pc 在五度圈上的索引 */
+function fifthIndex(pc){
+  // 找出 k 使 (k*7) mod 12 === pc
+  for(let k=0;k<12;k++) if(((k*7)%12)===pc) return k;
+  return 0;
+}
+function fifthAngle(pc){
+  return -Math.PI/2 + TAU*fifthIndex(pc)/12;
+}
+
+function renderCircle(){
+  const base = Math.min(W, H*1.30) * 0.30 * (+$('zoom').value/100);
+  const R_semi  = base;
+  const R_fifth = base*1.34;
+  const cx = CX, cy = H/2;
+  const rot = cam.az;
+  const actPC = new Set(activeNotes.map(n=>pcOf(n.midi)));
+
+  const showInner = (circleMode==='both' || circleMode==='inner');
+  const showOuter = (circleMode==='both' || circleMode==='outer');
+
+  /* --- 內環：半音圈 --- */
+  if(showInner){
+    ctx.beginPath(); ctx.arc(cx, cy, R_semi, 0, TAU);
+    ctx.strokeStyle='rgba(127,215,255,0.5)'; ctx.lineWidth=2.4; ctx.stroke();
+
+    for(let pc=0; pc<12; pc++){
+      const a = pcAngle(pc) + rot;           // 半音位置
+      const x = cx + Math.cos(a)*R_semi;
+      const y = cy + Math.sin(a)*R_semi;
+      const hot = actPC.has(pc);
+
+      if(hot){
+        ctx.beginPath(); ctx.arc(x,y,26,0,TAU);
+        ctx.fillStyle='rgba(255,210,120,0.16)'; ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(x,y, hot?11:6.5, 0, TAU);
+      ctx.fillStyle = hot ? '#ffe69a' : 'rgba(130,185,255,0.62)';
+      if(hot){ ctx.shadowBlur=24; ctx.shadowColor='rgba(255,200,90,0.95)'; }
+      ctx.fill(); ctx.shadowBlur=0;
+
+      if(showLabels){
+        const lx = cx + Math.cos(a)*(R_semi+34);
+        const ly = cy + Math.sin(a)*(R_semi+34);
+        ctx.font = `bold ${hot?21:17}px ui-monospace,monospace`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle = hot ? '#fff4cc' : (pc===0 ? '#ffd98a' : 'rgba(196,220,246,0.92)');
+        ctx.shadowBlur=9; ctx.shadowColor='#000';
+        ctx.fillText(PC[pc], lx, ly);
+        ctx.shadowBlur=0;
+      }
+    }
+  }
+
+  /* --- 外環：真正的五度圈（位置重排） --- */
+  if(showOuter){
+    ctx.beginPath(); ctx.arc(cx, cy, R_fifth, 0, TAU);
+    ctx.strokeStyle='rgba(255,204,102,0.32)'; ctx.lineWidth=2; ctx.stroke();
+
+    for(let k=0; k<12; k++){
+      const pc = (k*7)%12;
+      const a = -Math.PI/2 + TAU*k/12 + rot;   // 按五度順序排角度（不是 pc 角度）
+      const x = cx + Math.cos(a)*R_fifth;
+      const y = cy + Math.sin(a)*R_fifth;
+      const hot = actPC.has(pc);
+
+      if(hot){
+        ctx.beginPath(); ctx.arc(x,y,22,0,TAU);
+        ctx.fillStyle='rgba(255,204,102,0.16)'; ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(x,y, hot?9:6, 0, TAU);
+      ctx.fillStyle = hot ? '#ffdd8a' : 'rgba(255,204,102,0.55)';
+      if(hot){ ctx.shadowBlur=20; ctx.shadowColor='rgba(255,190,70,0.9)'; }
+      ctx.fill(); ctx.shadowBlur=0;
+
+      if(showLabels){
+        const lx = cx + Math.cos(a)*(R_fifth+26);
+        const ly = cy + Math.sin(a)*(R_fifth+26);
+        ctx.font = `bold ${hot?17:15}px ui-monospace,monospace`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle = hot ? '#fff0c0' : 'rgba(255,204,102,0.78)';
+        ctx.shadowBlur=9; ctx.shadowColor='#000';
+        ctx.fillText(PC[pc], lx, ly);
+        ctx.shadowBlur=0;
+      }
+    }
+  }
+
+  /* --- 軌跡：內環（青）與外環（金）分開畫 --- */
+  if(starTrail.length>1){
+    if(showInner){
+      const pts = starTrail.map(t=>{
+        const a = pcAngle(t.pc) + rot;
+        return { x: cx+Math.cos(a)*R_semi, y: cy+Math.sin(a)*R_semi };
+      });
+      tube(pts, '127,215,255', 1.0, 0.95);
+    }
+    if(showOuter){
+      const pts = starTrail.map(t=>{
+        const a = fifthAngle(t.pc) + rot;
+        return { x: cx+Math.cos(a)*R_fifth, y: cy+Math.sin(a)*R_fifth };
+      });
+      tube(pts, '255,204,102', 1.0, 0.95);
+    }
+  }
+
+  ctx.font='bold 14px ui-monospace,monospace';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(150,185,220,0.6)';
+  ctx.fillText('PITCH-CLASS', cx, cy-14);
+  ctx.fillText('CIRCLE', cx, cy+12);
+  ctx.font='11px ui-monospace,monospace';
+  ctx.fillStyle='rgba(127,215,255,0.6)';
+  ctx.fillText('內環：半音 +1', cx, cy+40);
+  ctx.fillStyle='rgba(255,204,102,0.6)';
+  ctx.fillText('外環：五度 +7（已重排）', cx, cy+58);
+}
+
+/* ============================================================
+   §15 Tonnetz（嚴格三和弦判定）
+   ============================================================ */
+function tzPC(q,r){ return ((7*q + 4*r)%12 + 12)%12; }
+
+function isTriad(pcs){
+  for(let i=0;i<3;i++){
+    const r = pcs[i];
+    const others = pcs.filter((_,j)=>j!==i)
+                      .map(x=>((x-r)+12)%12)
+                      .sort((a,b)=>a-b);
+    if(others[0]===4 && others[1]===7) return 'maj';
+    if(others[0]===3 && others[1]===7) return 'min';
+  }
+  return null;
+}
+
+function renderTonnetz(){
+  const N = 5;
+  const base = Math.min(W, H*1.32)/(2.6*N) * (+$('zoom').value/100);
+  const cx = CX, cy = H/2;
+  const rot = cam.az*0.5;
+  const cR = Math.cos(rot), sR = Math.sin(rot);
+
+  function P(q,r){
+    const x = base*1.5*q;
+    const y = base*SQ3*(r + q/2);
+    return { x: cx + x*cR - y*sR, y: cy + x*sR + y*cR };
+  }
+
+  const cells=[];
+  for(let q=-N;q<=N;q++)
+    for(let r=-N;r<=N;r++)
+      if(Math.max(Math.abs(q),Math.abs(r),Math.abs(q+r))<=N)
+        cells.push({q,r});
+
+  const actPC = new Set(activeNotes.map(n=>pcOf(n.midi)));
+
+  let hotMaj=null, hotMin=null;
+  actPC.forEach(root=>{
+    if(hotMaj===null && actPC.has((root+4)%12) && actPC.has((root+7)%12)) hotMaj=root;
+  });
+  actPC.forEach(root=>{
+    if(hotMin===null && actPC.has((root+3)%12) && actPC.has((root+7)%12)) hotMin=root;
+  });
+
+  /* 三角形 */
+  cells.forEach(({q,r})=>{
+    if(Math.max(Math.abs(q+1),Math.abs(r),Math.abs(q+1+r))>N) return;
+    if(Math.max(Math.abs(q),Math.abs(r+1),Math.abs(q+r+1))>N) return;
+
+    const pA=P(q,r), pB=P(q+1,r), pC=P(q,r+1);
+    const pcs=[tzPC(q,r), tzPC(q+1,r), tzPC(q,r+1)];
+    const kind = isTriad(pcs);
+    if(!kind) return;
+
+    const isHot = (kind==='maj' && hotMaj!==null && pcs.includes(hotMaj))
+               || (kind==='min' && hotMin!==null && pcs.includes(hotMin));
+
+    let fill;
+    if(isHot) fill='rgba(140,255,190,0.34)';
+    else if(kind==='maj') fill='rgba(127,215,255,0.11)';
+    else fill='rgba(255,204,102,0.11)';
+
+    ctx.beginPath();
+    ctx.moveTo(pA.x,pA.y); ctx.lineTo(pB.x,pB.y); ctx.lineTo(pC.x,pC.y);
+    ctx.closePath();
+    ctx.fillStyle=fill; ctx.fill();
+    ctx.strokeStyle = isHot ? 'rgba(160,255,200,0.6)'
+      : (kind==='maj' ? 'rgba(127,215,255,0.24)' : 'rgba(255,204,102,0.24)');
+    ctx.lineWidth = isHot ? 2 : 1;
+    ctx.stroke();
+  });
+
+  /* 節點 */
+  cells.forEach(({q,r})=>{
+    const pc = tzPC(q,r);
+    const p = P(q,r);
+    const hot = actPC.has(pc);
+
+    if(hot){
+      ctx.beginPath(); ctx.arc(p.x,p.y,20,0,TAU);
+      ctx.fillStyle='rgba(255,210,120,0.16)'; ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(p.x,p.y, hot?8:4.5, 0, TAU);
+    ctx.fillStyle = hot ? '#ffe69a' : 'rgba(120,170,240,0.42)';
+    if(hot){ ctx.shadowBlur=20; ctx.shadowColor='rgba(255,200,90,0.9)'; }
+    ctx.fill(); ctx.shadowBlur=0;
+
+    if(showLabels){
+      ctx.font = `bold ${hot?15:11}px ui-monospace,monospace`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle = hot ? '#fff4cc' : 'rgba(160,195,230,0.62)';
+      ctx.shadowBlur=6; ctx.shadowColor='#000';
+      ctx.fillText(PC[pc], p.x, p.y - (hot?19:13));
+      ctx.shadowBlur=0;
+    }
+  });
+
+  /* 軌跡 */
+  if(starTrail.length>1){
+    const pts=[];
+    starTrail.forEach(t=>{
+      let best=null, bd=1e9;
+      cells.forEach(({q,r})=>{
+        if(tzPC(q,r)!==t.pc) return;
+        const d=q*q+r*r;
+        if(d<bd){ bd=d; best={q,r}; }
+      });
+      if(best) pts.push(P(best.q,best.r));
+    });
+    tube(pts, '255,204,102', 0.95, 0.95);
+  }
+
+  ctx.font='bold 12px ui-monospace,monospace';
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.fillStyle='rgba(127,215,255,0.65)';
+  ctx.fillText('→ 純五度 +7', 20, H-128);
+  ctx.fillStyle='rgba(255,204,102,0.65)';
+  ctx.fillText('↘ 大三度 +4', 20, H-108);
+  ctx.font='11px ui-monospace,monospace';
+  ctx.fillStyle='rgba(150,185,220,0.5)';
+  ctx.fillText('三角形＝三和弦（藍大／金小／綠響）', 20, H-86);
+}
+
+/* ============================================================
+   §16 主迴圈
+   ============================================================ */
+function render(wallNow){
+  if(cv.clientWidth!==W || cv.clientHeight!==H) resizeCanvas();
+
+  clockTick(wallNow);
+  if(cam.autoRot) cam.az += 0.0028;
+
+  bg();
+
+  if(mode==='merkaba') renderMerkaba();
+  else if(mode==='metatron') renderMetatron();
+  else if(mode==='disc') renderDisc();
+  else if(mode==='circle') renderCircle();
+  else if(mode==='tonnetz') renderTonnetz();
+
+  const lbl = {
+    merkaba:'梅卡巴 8 頂點',
+    metatron:'梅塔特隆 13 頂點',
+    disc:'六角星盤 '+NODES.length+' 節點',
+    circle:'音級環 + 五度圈',
+    tonnetz:'TONNETZ'
+  }[mode];
+
+  $('hud').textContent =
+`${lbl}   [${CLK.playing?'PLAYING':'PAUSED'}]
+A4 = ${baseA4}Hz   速度 ${CLK.speed}×   根音 ${PC[rootPC]}   環數 ${ringCount}
+t = ${nowSec.toFixed(2)} / ${CLK.dur.toFixed(2)} s   活躍音 ${activeNotes.length}
+軌跡 ${starTrail.length} 點   az ${(cam.az*180/Math.PI).toFixed(0)}° el ${(cam.el*180/Math.PI).toFixed(0)}°`;
+
+  const sk = $('seek');
+  if(!sk._drag) sk.value = CLK.dur ? (nowSec/CLK.dur*1000) : 0;
+
+  const fmt = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+  $('time').textContent = `${fmt(nowSec)} / ${fmt(CLK.dur)}`;
+
+  requestAnimationFrame(render);
+}
+
+/* ============================================================
+   §17 示範曲
+   ============================================================ */
+function loadEvents(evs, name){
+  evs.sort((a,b)=>a.t-b.t);
+  CLK.events = evs;
+  CLK.dur = Math.max(...evs.map(e=>e.t+e.dur)) + 0.7;
+  CLK.idx = 0; CLK.startPos = 0; nowSec = 0; CLK.playing = false;
+  activeNotes = []; starTrail = []; metaTrail = [];
+  $('trace').innerHTML = '';
+  pushTrace('載入：'+name+'  共 '+evs.length+' 個音');
+  toast('已載入 '+name);
+}
+
+$('demo1').onclick = ()=>{
+  const chords = [
+    [0,[60,64,67,72]],[1,[60,64,67,72]],[2,[59,62,67,71]],[3,[59,62,67,71]],
+    [4,[57,60,65,69]],[5,[57,60,65,69]],[6,[55,59,64,67]],[7,[55,59,64,67]],
+    [8,[53,57,60,65]],[9,[53,57,60,65]],[10,[52,55,60,64]],[11,[52,55,60,64]],
+    [12,[50,55,59,62]],[13,[50,55,59,62]],[14,[48,52,55,60]],[15,[48,52,55,60]]
+  ];
+  const evs=[];
+  chords.forEach(([beat,ch])=>{
+    ch.forEach(m=>evs.push({t:beat*0.30, midi:m, dur:0.60, vel:0.68}));
+  });
+  const mel=[72,76,79,84,83,79,76,74,72,71,69,67,65,64,62,60];
+  mel.forEach((m,i)=>evs.push({t:i*0.30+0.04, midi:m, dur:0.32, vel:0.92}));
+  loadEvents(evs,'巴赫 C 大調前奏曲');
+};
+
+$('demo2').onclick = ()=>{
+  const penta=[60,62,64,67,69,72,74,76,79,81,84];
+  const evs=[];
+  for(let c=0;c<3;c++){
+    penta.forEach((m,i)=>{
+      evs.push({t:c*4.4 + i*0.40, midi:m, dur:1.7, vel:0.5});
+    });
+    evs.push({t:c*4.4, midi:48, dur:4.2, vel:0.34});
+  }
+  baseA4 = 432;
+  $('base432').classList.add('active');
+  $('base440').classList.remove('active');
+  loadEvents(evs,'432Hz 五聲冥想');
+};
+
+$('demo3').onclick = ()=>{
+  const evs=[];
+  for(let i=0;i<12;i++) evs.push({t:i*0.24, midi:60+i, dur:0.32, vel:0.82});
+  for(let i=0;i<12;i++) evs.push({t:3.0+i*0.24, midi:71-i, dur:0.32, vel:0.72});
+  for(let i=0;i<12;i++){
+    evs.push({t:6.0+i*0.26, midi:60+i, dur:0.30, vel:0.76});
+    evs.push({t:6.0+i*0.26, midi:60+(i+6)%12, dur:0.30, vel:0.76});
+  }
+  loadEvents(evs,'十二音對稱琶音');
+};
+
+/* ============================================================
+   §18 MIDI 匯入
+   ============================================================ */
+$('midiFile').onchange = async e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  pushTrace('解析中：'+f.name);
+  try{
+    const buf = await f.arrayBuffer();
+    const midi = new Midi(buf);
+    const evs=[];
+    midi.tracks.forEach(tr=>tr.notes.forEach(n=>{
+      evs.push({t:n.time, dur:Math.max(0.10,n.duration), midi:n.midi, vel:n.velocity});
+    }));
+    evs.sort((a,b)=>a.t-b.t);
+    loadEvents(evs, f.name+'（'+midi.tracks.length+' 軌 / '+evs.length+' 音）');
+  }catch(err){
+    pushTrace('解析失敗：'+err.message);
+    console.error(err);
+  }
+};
+
+/* ============================================================
+   §19 UI 綁定
+   ============================================================ */
+function setMode(m){
+  mode = m;
+  const map = {vMerkaba:'merkaba', vMetatron:'metatron', vDisc:'disc',
+               vCircle:'circle', vTonnetz:'tonnetz'};
+  Object.keys(map).forEach(id=>{
+    const el = $(id);
+    if(el) el.classList.toggle('active', map[id]===m);
+  });
+  starTrail=[]; metaTrail=[];
+}
+['vMerkaba','vMetatron','vDisc','vCircle','vTonnetz'].forEach(id=>{
+  $(id).onclick = ()=>{
+    const map = {vMerkaba:'merkaba', vMetatron:'metatron', vDisc:'disc',
+                 vCircle:'circle', vTonnetz:'tonnetz'};
+    setMode(map[id]);
+  };
+});
+
+function setCircleMode(m){
+  circleMode = m;
+  $('cBoth').classList.toggle('active', m==='both');
+  $('cInner').classList.toggle('active', m==='inner');
+  $('cOuter').classList.toggle('active', m==='outer');
+}
+$('cBoth').onclick  = ()=>setCircleMode('both');
+$('cInner').onclick = ()=>setCircleMode('inner');
+$('cOuter').onclick = ()=>setCircleMode('outer');
+
+$('az').oninput = e=>{
+  cam.az = (+e.target.value)*Math.PI/180;
+  $('azVal').textContent = e.target.value+'°';
+};
+$('el').oninput = e=>{
+  cam.el = (+e.target.value)*Math.PI/180;
+  $('elVal').textContent = e.target.value+'°';
+};
+$('zoom').oninput = e=>{
+  $('zoomVal').textContent = (+e.target.value/100).toFixed(2)+'×';
+};
+$('autoRot').onclick = function(){
+  cam.autoRot = !cam.autoRot;
+  this.classList.toggle('active', cam.autoRot);
+  this.textContent = cam.autoRot ? '↻ 自動旋轉:開' : '↻ 自動旋轉';
+};
+$('resetCam').onclick = ()=>{
+  cam.az=0; cam.el=18*Math.PI/180; cam.autoRot=false;
+  $('az').value=0; $('el').value=18; $('zoom').value=100;
+  $('azVal').textContent='0°'; $('elVal').textContent='18°';
+  $('zoomVal').textContent='1.00×';
+  $('autoRot').classList.remove('active');
+  $('autoRot').textContent='↻ 自動旋轉';
+};
+
+$('base432').onclick = function(){
+  baseA4=432;
+  this.classList.add('active'); $('base440').classList.remove('active');
+  toast('A4 = 432 Hz');
+};
+$('base440').onclick = function(){
+  baseA4=440;
+  this.classList.add('active'); $('base432').classList.remove('active');
+  toast('A4 = 440 Hz');
+};
+
+/* 根音 */
+const rootBox = $('rootBtns');
+PC.forEach((n,i)=>{
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.style.fontSize = '10px';
+  b.style.padding = '5px 2px';
+  if(i===0) b.classList.add('active');
+  
+    b.onclick = ()=>{
+      rootPC = i;
+      NODES = buildNodes(ringCount);
+      indexNodes();
+      [...rootBox.children].forEach(c=>c.classList.remove('active'));
+      b.classList.add('active');
+      toast('中心根音 → '+n);
+    };
+    rootBox.appendChild(b);
+}); 
+
+/* 螺旋規律 */
+$('spChromatic').onclick = function(){
+  spiral = 1;
+  this.classList.add('active');
+  $('spFifths').classList.remove('active');
+  NODES = buildNodes(ringCount);
+  indexNodes();
+  toast('螺旋規律：半音 +1');
+};
+$('spFifths').onclick = function(){
+  spiral = 7;
+  this.classList.add('active');
+  $('spChromatic').classList.remove('active');
+  NODES = buildNodes(ringCount);
+  indexNodes();
+  toast('螺旋規律：五度 +7');
+};
+
+/* 星盤環數 */
+$('ringCount').oninput = e=>{
+  ringCount = +e.target.value;
+  $('ringVal').textContent = ringCount;
+  NODES = buildNodes(ringCount);
+  indexNodes();
+};
+
+/* 軌跡設定 */
+$('modeKeep').onclick = function(){
+  trailMode = 'keep';
+  this.classList.add('active');
+  $('modeFade').classList.remove('active');
+};
+$('modeFade').onclick = function(){
+  trailMode = 'fade';
+  this.classList.add('active');
+  $('modeKeep').classList.remove('active');
+};
+$('tw').oninput = e=>{ $('twVal').textContent = (+e.target.value/10).toFixed(1)+'×'; };
+$('glow').oninput = e=>{ $('glowVal').textContent = e.target.value+'%'; };
+$('clearTrail').onclick = ()=>{
+  starTrail = []; metaTrail = [];
+  $('trace').innerHTML = '';
+  pushTrace('已清除所有軌跡');
+};
+
+/* 顯示 / 音色 */
+$('tOctal').onclick = function(){
+  showOctal = !showOctal;
+  this.classList.toggle('active', showOctal);
+  toast(showOctal ? '八度泛音共振:開' : '八度泛音共振:關');
+};
+$('tLabels').onclick = function(){
+  showLabels = !showLabels;
+  this.classList.toggle('active', showLabels);
+};
+
+function setTimbre(name, btnId){
+  timbre = name;
+  ['tCrystal','tTri','tStrings'].forEach(id=>$(id).classList.remove('active'));
+  $(btnId).classList.add('active');
+}
+$('tCrystal').onclick = ()=>setTimbre('crystal','tCrystal');
+$('tTri').onclick     = ()=>setTimbre('tri','tTri');
+$('tStrings').onclick = ()=>setTimbre('strings','tStrings');
+
+$('vol').oninput = e=>{
+  $('volVal').textContent = e.target.value+'%';
+  if(MASTER) MASTER.gain.value = (+e.target.value/100)*0.55;
+};
+
+/* 面板收合 */
+$('toggle').onclick = function(){
+  const p = $('panel');
+  p.classList.toggle('collapsed');
+  this.textContent = p.classList.contains('collapsed') ? '‹' : '›';
+};
+
+/* ============================================================
+   §20 播放控制列
+   ============================================================ */
+$('playBtn').onclick = startPlay;
+$('pauseBtn').onclick = pausePlay;
+$('stopBtn').onclick = stopPlay;
+
+document.querySelectorAll('#speeds button').forEach(b=>{
+  b.onclick = ()=>{
+    CLK.speed = parseFloat(b.dataset.s);
+    if(CLK.playing){
+      const cur = nowSec;
+      CLK.startPos = cur;
+      CLK.startWall = performance.now() - cur*1000/CLK.speed;
+    }
+    document.querySelectorAll('#speeds button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+  };
+});
+
+/* 進度條：拖曳中不讓主迴圈覆寫；放開才 seek */
+const seekEl = $('seek');
+seekEl.addEventListener('input', ()=>{ seekEl._drag = true; });
+seekEl.addEventListener('change', ()=>{
+  seekTo(CLK.dur*(+seekEl.value/1000));
+  seekEl._drag = false;
+});
+['mousedown','touchstart'].forEach(ev=>{
+  seekEl.addEventListener(ev, ()=>{ seekEl._drag = true; }, {passive:true});
+});
+['mouseup','touchend'].forEach(ev=>{
+  window.addEventListener(ev, ()=>{
+    if(seekEl._drag){
+      seekTo(CLK.dur*(+seekEl.value/1000));
+      seekEl._drag = false;
+    }
+  }, {passive:true});
+});
+
+/* ============================================================
+   §21 鍵盤快捷
+   ============================================================ */
+window.addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA') return;
+  if(e.code==='Space'){ e.preventDefault(); CLK.playing ? pausePlay() : startPlay(); }
+  if(e.key==='Escape') stopPlay();
+  if(e.key==='1') setMode('merkaba');
+  if(e.key==='2') setMode('metatron');
+  if(e.key==='3') setMode('disc');
+  if(e.key==='4') setMode('circle');
+  if(e.key==='5') setMode('tonnetz');
+});
+
+/* ============================================================
+   §22 滑鼠 / 觸控旋轉
+   ============================================================ */
+cv.addEventListener('mousedown', e=>{
+  MOUSE.down = true; MOUSE.moved = false;
+  MOUSE.x = e.clientX; MOUSE.y = e.clientY;
+  MOUSE.az0 = cam.az; MOUSE.el0 = cam.el;
+  cv.classList.add('dragging');
+});
+window.addEventListener('mousemove', e=>{
+  if(!MOUSE.down) return;
+  const dx = e.clientX - MOUSE.x;
+  const dy = e.clientY - MOUSE.y;
+  if(Math.abs(dx)>3 || Math.abs(dy)>3) MOUSE.moved = true;
+  cam.az = MOUSE.az0 + dx*0.008;
+  cam.el = Math.max(-1.45, Math.min(1.45, MOUSE.el0 + dy*0.008));
+  /* 回寫滑桿 */
+  let azDeg = Math.round(cam.az*180/Math.PI);
+  azDeg = ((azDeg+540)%360)-180;
+  $('az').value = azDeg;
+  $('el').value = Math.round(cam.el*180/Math.PI);
+  $('azVal').textContent = azDeg+'°';
+  $('elVal').textContent = Math.round(cam.el*180/Math.PI)+'°';
+});
+window.addEventListener('mouseup', ()=>{
+  MOUSE.down = false;
+  cv.classList.remove('dragging');
+});
+
+cv.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const z = $('zoom');
+  z.value = Math.max(40, Math.min(260, +z.value + (e.deltaY>0 ? -6 : 6)));
+  z.dispatchEvent(new Event('input'));
+}, {passive:false});
+
+cv.addEventListener('dblclick', ()=>$('resetCam').click());
+
+/* 觸控 */
+cv.addEventListener('touchstart', e=>{
+  if(e.touches.length===1){
+    const t = e.touches[0];
+    MOUSE.down = true; MOUSE.moved = false;
+    MOUSE.x = t.clientX; MOUSE.y = t.clientY;
+    MOUSE.az0 = cam.az; MOUSE.el0 = cam.el;
+  }
+}, {passive:true});
+cv.addEventListener('touchmove', e=>{
+  if(!MOUSE.down || e.touches.length!==1) return;
+  const t = e.touches[0];
+  const dx = t.clientX-MOUSE.x, dy = t.clientY-MOUSE.y;
+  if(Math.abs(dx)>3 || Math.abs(dy)>3) MOUSE.moved = true;
+  cam.az = MOUSE.az0 + dx*0.008;
+  cam.el = Math.max(-1.45, Math.min(1.45, MOUSE.el0 + dy*0.008));
+}, {passive:true});
+cv.addEventListener('touchend', ()=>{ MOUSE.down=false; }, {passive:true});
+
+/* ============================================================
+   §23 點擊節點奏鳴
+   ============================================================ */
+cv.addEventListener('click', e=>{
+  if(MOUSE.moved) return;
+  const mx = e.clientX, my = e.clientY;
+  let hit = null, hd = 28;
+
+  if(mode==='disc'){
+    const world = NODES.map(n=>rot3([n.x,n.y,n.z], cam.az, cam.el));
+    const raw = world.map(p=>projRaw(p));
+    const fit = fitToCanvas(raw, 0.40);
+    NODES.forEach((n,i)=>{
+      const p = fit.map(raw[i]);
+      const d = Math.hypot(p.x-mx, p.y-my);
+      if(d<hd){ hd=d; hit={midi:60+n.pc, node:n}; }
+    });
+  } else if(mode==='metatron'){
+    const verts = metatronWorld();
+    const raw = verts.map(v=>projRaw(rot3(v.p, cam.az, cam.el)));
+    const fit = fitToCanvas(raw, 0.32);
+    verts.forEach((v,i)=>{
+      if(v.pc<0) return;
+      const p = fit.map(raw[i]);
+      const d = Math.hypot(p.x-mx, p.y-my);
+      if(d<hd){ hd=d; hit={midi:60+v.pc}; }
+    });
+  } else if(mode==='merkaba'){
+    const verts = merkabaWorld();
+    const raw = verts.map(v=>projRaw(rot3(v.p, cam.az, cam.el)));
+    const fit = fitToCanvas(raw, 0.30);
+    verts.forEach((v,i)=>{
+      const p = fit.map(raw[i]);
+      const d = Math.hypot(p.x-mx, p.y-my);
+      if(d<hd){ hd=d; hit={midi:60+MERK_PC[i]}; }
+    });
+  } else if(mode==='circle'){
+    const base = Math.min(W, H*1.30)*0.30*(+$('zoom').value/100);
+    const cx = CX, cy = H/2;
+    const showInner = (circleMode==='both' || circleMode==='inner');
+    const showOuter = (circleMode==='both' || circleMode==='outer');
+
+    if(showInner){
+      for(let pc=0;pc<12;pc++){
+        const a = pcAngle(pc) + cam.az;
+        const x = cx+Math.cos(a)*base, y = cy+Math.sin(a)*base;
+        const d = Math.hypot(x-mx, y-my);
+        if(d<hd){ hd=d; hit={midi:60+pc}; }
+      }
+    }
+    if(showOuter){
+      for(let k=0;k<12;k++){
+        const pc = (k*7)%12;
+        const a = -Math.PI/2 + TAU*k/12 + cam.az;
+        const x = cx+Math.cos(a)*base*1.34, y = cy+Math.sin(a)*base*1.34;
+        const d = Math.hypot(x-mx, y-my);
+        if(d<hd){ hd=d; hit={midi:60+pc}; }
+      }
+    }
+  } else if(mode==='tonnetz'){
+    const N=5;
+    const base = Math.min(W, H*1.32)/(2.6*N)*(+$('zoom').value/100);
+    const rot = cam.az*0.5, cR=Math.cos(rot), sR=Math.sin(rot);
+    for(let q=-N;q<=N;q++) for(let r=-N;r<=N;r++){
+      if(Math.max(Math.abs(q),Math.abs(r),Math.abs(q+r))>N) continue;
+      const x0=base*1.5*q, y0=base*SQ3*(r+q/2);
+      const x = CX + x0*cR - y0*sR;
+      const y = H/2 + x0*sR + y0*cR;
+      const d = Math.hypot(x-mx, y-my);
+      if(d<hd){ hd=d; hit={midi:60+tzPC(q,r)}; }
+    }
+  }
+
+  if(hit){
+    audioInit();
+    if(AC.state==='suspended') AC.resume();
+    voice(hit.midi, AC.currentTime, 1.2, 0.9);
+    onNote(hit.midi);
+  }
+});
+
+/* ============================================================
+   §24 啟動
+   ============================================================ */
+resizeCanvas();
+$('tw').dispatchEvent(new Event('input'));
+$('glow').dispatchEvent(new Event('input'));
+$('zoom').dispatchEvent(new Event('input'));
+$('vol').dispatchEvent(new Event('input'));
+$('ringCount').dispatchEvent(new Event('input'));
+
+/* 預先載入示範曲，避免開場空白 */
+$('demo1').click();
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
