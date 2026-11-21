@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>音階六芒星 · 梅爾卡巴 MIDI 軌跡播放器</title>
+<style>
+:root{--bg:#0a0f1c;--panel:#111a30;--line:#26334f;--txt:#dfe7f7;--dim:#8da0c4;--acc:#ffd166;--cy:#50c8ff}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.02em}
+header small{color:var(--dim)}
+.views{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
+@media (max-width:900px){.views{grid-template-columns:1fr}}
+.view{position:relative;background:#0d1426;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.view h2{position:absolute;left:10px;top:6px;right:10px;margin:0;font-size:12px;color:var(--dim);font-weight:500;pointer-events:none}
+.view .tools{position:absolute;right:8px;bottom:8px;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+canvas{display:block;width:100%;aspect-ratio:1/1;touch-action:none;cursor:crosshair}
+.ctrl{margin:0 10px 10px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap}
+.row label{display:inline-flex;gap:6px;align-items:center;color:var(--dim);white-space:nowrap}
+button,.btn,select{background:#1b2744;color:var(--txt);border:1px solid #33456b;border-radius:7px;padding:5px 11px;font:inherit;cursor:pointer}
+button:hover,.btn:hover,select:hover{border-color:#5b7cc0}
+button.on{background:#3a5a2d;border-color:#7bd05a}
+button.primary{background:#2a4a8a;border-color:#5b8be0}
+input[type=range]{accent-color:var(--acc)}
+#seek{flex:1 1 220px;min-width:140px}
+#time{font-variant-numeric:tabular-nums;color:var(--txt)}
+input[type=checkbox]{accent-color:var(--acc)}
+#tracks label{color:var(--txt);background:#16213b;border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+#info{font-size:13px;color:var(--txt);display:grid;gap:3px}
+#info b{color:var(--acc);font-weight:600}
+#info .dim{color:var(--dim)}
+details{margin:0 10px 18px;color:var(--dim);font-size:13px}
+details summary{cursor:pointer;color:var(--txt)}
+details p,details li{margin:.4em 0}
+.sharp{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>✦ 音階六芒星 · 梅爾卡巴 3D 矩陣 · MIDI 軌跡播放器</h1>
+  <small>12 條音階射線 × 10 個八度 = 120 個六角格(MIDI 0–119)· 只用升記號 <span class="sharp">♯</span> · 中心為空六芒星</small>
+</header>
+
+<section class="views">
+  <div class="view">
+    <h2>3D 梅爾卡巴矩陣:拖曳旋轉 · 滾輪縮放 · 點六角格發聲(高度 = 音高)</h2>
+    <canvas id="cv3d"></canvas>
+    <div class="tools">
+      <button id="btnTop">俯視(=平面投影)</button>
+      <button id="btnSide">側視</button>
+      <button id="btn3dReset">重設</button>
+    </div>
+  </div>
+  <div class="view">
+    <h2>平面投影:六角星形的六角格集合(121 格)· 點格發聲</h2>
+    <canvas id="cvFlat"></canvas>
+  </div>
+</section>
+
+<section class="ctrl">
+  <div class="row">
+    <select id="song" title="曲目"></select>
+    <label class="btn" for="file" title="也可以把 .mid 檔直接拖進頁面">📂 載入 MIDI</label>
+    <input type="file" id="file" accept=".mid,.midi,audio/midi,audio/x-midi" hidden>
+    <button id="btnPlay" class="primary">▶ 播放</button>
+    <button id="btnStop">⏹ 停止</button>
+    <button id="btnRep" class="on">🔁 重複</button>
+    <input type="range" id="seek" min="0" max="1000" value="0">
+    <span id="time">0:00 / 0:00</span>
+    <label>速度 <input type="range" id="tempo" min="0.25" max="2" step="0.05" value="1"><span id="tempoV">1.00×</span></label>
+  </div>
+  <div class="row">
+    <label>生長方式
+      <select id="layout">
+        <option value="chromatic">半音階(每條射線 +1 半音)</option>
+        <option value="fifths">五度圈(每條射線 +1 個五度)</option>
+      </select>
+    </label>
+    <label>音色
+      <select id="timbre"><option value="flute">長笛感</option><option value="piano">鋼琴感</option><option value="bell">鐘聲</option></select>
+    </label>
+    <label>音量 <input type="range" id="vol" min="0" max="1" step="0.05" value="0.7"></label>
+    <label>軌跡取樣
+      <select id="pathMode"><option value="skyline">旋律線(同時發音取最高音)</option><option value="all">全部音符依序</option></select>
+    </label>
+    <label>立體高度 <input type="range" id="hs" min="0" max="1.6" step="0.05" value="0.8"></label>
+    <button id="btnFlat">壓扁成平面</button>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="cPathAll" checked> 全曲軌跡(藍→紅)</label>
+    <label><input type="checkbox" id="cTrail" checked> 即時尾跡</label>
+    <label><input type="checkbox" id="cLabel" checked> 音名</label>
+    <label><input type="checkbox" id="cRays" checked> 12 射線與音級</label>
+    <label><input type="checkbox" id="cTri" checked> 六角星三角(增三和弦)</label>
+    <label><input type="checkbox" id="cFrame" checked> 梅爾卡巴框</label>
+    <label><input type="checkbox" id="cCounter"> 反向旋轉</label>
+    <label><input type="checkbox" id="cSpin" checked> 自動環繞</label>
+    <label><input type="checkbox" id="cOrtho"> 正交投影</label>
+  </div>
+  <div class="row" id="tracks"></div>
+  <div id="info"></div>
+</section>
+
+<details>
+  <summary>這個模型怎麼對應?(點開看說明)</summary>
+  <p><b>一條規則:</b>半音階繞著一個空的六芒星向外螺旋,每圈 12 格 = 一個八度。把 12 個音級放在 12 條射線上(每 30° 一條),往外一格就高一個八度。</p>
+  <ul>
+    <li><b>平面六角星:</b>兩個正三角形疊成的六角星(梅爾卡巴由上往下的投影),內含 121 個六角格:中心 1 格留空,其餘 120 格 = 12 條楔形 × 10 個八度 = MIDI 0–119。每個楔形從自己的射線起順時針涵蓋 30°。</li>
+    <li><b>3D 矩陣:</b>同一批六角格,水平位置與平面圖完全相同,高度 = 音高。按「俯視」就會回到平面投影。金色與青色線框是兩個反向的正四面體(梅爾卡巴,共 12 條稜、頂點投影成六角星)。</li>
+    <li><b>生長方式:</b>「半音階」= 射線 k 的音級是 k;「五度圈」= 每條射線 +7 半音,音級順序變成 C G D A E B F♯ C♯ G♯ D♯ A♯ F。無論哪一種,六個星尖(偶數射線)都是全音音階,兩個三角形各是一個增三和弦:▲ C–E–G♯、▼ D–F♯–A♯。</li>
+    <li><b>鏡像:</b>以 D 為軸,音級 p 的鏡像是 (4−p) mod 12。C 大調的鏡像就是 E 弗里幾亞(同一組音),點選格子時會顯示並標出鏡像音級。</li>
+    <li><b>軌跡:</b>演奏時,依序把每個旋律音所在的六角格連線。顏色由藍到紅表示曲子進行的先後;連續重複同一音用小圓圈表示;線越粗代表該轉移出現越多次。</li>
+    <li><b>MIDI:</b>支援標準 MIDI 檔(格式 0/1、變速)。第 10 頻道(打擊樂)預設不啟用,可在音軌列自行勾選。超過 MIDI 119 的音會折回最外圈。</li>
+  </ul>
+  <p>「示範:A 大調五聲音階」是我為了測試寫的一段旋律,不是你的《薩滿的呼喚》;請直接載入你自己的 .mid 檔。</p>
+</details>
+
+<script>
+// ==CORE-START==
+const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];   // 只用升記號
+const SQ3 = Math.sqrt(3);
+const NL = 5, RR = NL - 1;          // 六角星層數 5 → 121 格(中心空六角 + 120 音)
+function noteName(m) { return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); }
+
+/* 六角星格:尖頂六角格,鄰格距離 u=1,畫面座標 y 向下。
+   六角星 = 兩個正三角形(▲ 尖點在 0°/120°/240°,▼ 尖點在 60°/180°/300°)的聯集。
+   角度 θ 由正上方起順時針量。12 條射線 = 每 30° 一條:偶數號為星尖,奇數號為凹角。
+   每個格子歸入「由某射線起、順時針 30° 內」的楔形,每個楔形剛好 10 格 → 10 個八度。 */
+function buildStar() {
+  const dir = t => { const a = t * Math.PI / 180; return [Math.sin(a), -Math.cos(a)]; };
+  const nA = [180, 300, 60].map(dir), nB = [0, 120, 240].map(dir);
+  const cells = [];
+  for (let r = -12; r <= 12; r++) for (let q = -12; q <= 12; q++) {
+    const x = q + r / 2, y = SQ3 / 2 * r;
+    if (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9) continue;          // 中心:空六芒星
+    const dA = Math.max(...nA.map(n => n[0] * x + n[1] * y));
+    const dB = Math.max(...nB.map(n => n[0] * x + n[1] * y));
+    const lam = Math.min(dA, dB) / (SQ3 / 2);                          // 六角星範數(第幾層殼)
+    if (lam > RR + 1e-6) continue;
+    let th = Math.atan2(x, -y) * 180 / Math.PI; if (th < 0) th += 360;
+    const k = Math.floor((th + 1e-6) / 30) % 12;
+    cells.push({ q, r, x, y, rho: Math.hypot(x, y), th, lam, k, rank: 0, idx: 0 });
+  }
+  const wedges = Array.from({ length: 12 }, () => []);
+  cells.forEach(c => wedges[c.k].push(c));
+  wedges.forEach(w => {
+    w.sort((a, b) => Math.abs(a.rho - b.rho) > 1e-9 ? a.rho - b.rho : a.th - b.th);
+    w.forEach((c, i) => c.rank = i);                                   // 由內向外 = 八度由低到高
+  });
+  cells.sort((a, b) => a.k - b.k || a.rank - b.rank);
+  cells.forEach((c, i) => c.idx = i);
+  return { cells, wedges };
+}
+/* 生長方式:chromatic = 每條射線 +1 半音;fifths = 每條射線 +1 個五度(7 半音)。7×7≡1 (mod 12) */
+function pcOfWedge(k, layout) { return layout === 'fifths' ? (7 * k) % 12 : k; }
+function wedgeOfPc(pc, layout) { return layout === 'fifths' ? (7 * pc) % 12 : pc; }
+function noteToCell(m, layout, wedges) {
+  const pc = ((m % 12) + 12) % 12;
+  const oct = Math.max(0, Math.min(9, Math.floor(m / 12)));
+  const w = wedges[wedgeOfPc(pc, layout)];
+  return w[Math.min(oct, w.length - 1)];
+}
+function cellToNote(c, layout) { return 12 * c.rank + pcOfWedge(c.k, layout); }
+
+/* ---------- 標準 MIDI 檔(SMF)解析 ---------- */
+function parseMidi(buf) {
+  const d = new DataView(buf); let p = 0;
+  const u8 = () => d.getUint8(p++);
+  const rd = n => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(d.getUint8(p++)); return s; };
+  if (d.byteLength < 14 || rd(4) !== 'MThd') throw new Error('不是有效的 MIDI 檔(找不到 MThd 標頭)');
+  const hl = d.getUint32(p); p += 4;
+  const fmt = d.getUint16(p), div = d.getUint16(p + 4); p += hl;
+  const smpte = (div & 0x8000) !== 0;
+  const tps = smpte ? (256 - (div >> 8)) * (div & 0xFF) : 0;
+  const tracks = [], tempos = [];
+  while (p + 8 <= d.byteLength) {
+    const id = rd(4), len = d.getUint32(p); p += 4;
+    const end = Math.min(p + len, d.byteLength);
+    if (id !== 'MTrk') { p = end; continue; }
+    let tick = 0, run = 0, name = '', evs = [];
+    while (p < end) {
+      let v = 0, b; do { b = u8(); v = (v * 128) + (b & 0x7f); } while ((b & 0x80) && p < end);
+      tick += v;
+      if (p >= end) break;
+      let st = d.getUint8(p);
+      if (st & 0x80) { p++; run = st < 0xF0 ? st : 0; } else st = run;
+      if (!st) { p = end; break; }
+      if (st === 0xFF) {
+        const type = u8(); let l = 0, bb; do { bb = u8(); l = (l << 7) | (bb & 0x7f); } while (bb & 0x80);
+        if (type === 0x51 && l === 3) tempos.push({ tick, us: (d.getUint8(p) << 16) | (d.getUint8(p + 1) << 8) | d.getUint8(p + 2) });
+        else if (type === 0x03 && !name) { try { name = new TextDecoder('utf-8').decode(new Uint8Array(buf, p, l)); } catch (e) { } }
+        p += l;
+      } else if (st === 0xF0 || st === 0xF7) {
+        let l = 0, bb; do { bb = u8(); l = (l << 7) | (bb & 0x7f); } while (bb & 0x80); p += l;
+      } else {
+        const hi = st & 0xF0, ch = st & 0x0F;
+        const a = u8(); const b2 = (hi === 0xC0 || hi === 0xD0) ? 0 : u8();
+        if (hi === 0x90 && b2 > 0) evs.push({ tick, on: 1, ch, m: a, v: b2 });
+        else if (hi === 0x80 || (hi === 0x90 && b2 === 0)) evs.push({ tick, on: 0, ch, m: a, v: b2 });
+      }
+    }
+    p = end;
+    tracks.push({ name, evs, lastTick: tick });
+  }
+  tempos.sort((a, b) => a.tick - b.tick);
+  if (!tempos.length || tempos[0].tick > 0) tempos.unshift({ tick: 0, us: 500000 });
+  const seg = []; let acc = 0;
+  for (let i = 0; i < tempos.length; i++) {
+    if (i > 0) acc += (tempos[i].tick - tempos[i - 1].tick) * tempos[i - 1].us / 1e6 / div;
+    seg.push({ tick: tempos[i].tick, sec: acc, us: tempos[i].us });
+  }
+  const t2s = tk => {
+    if (smpte) return tk / tps;
+    let lo = 0, hi = seg.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (seg[mid].tick <= tk) lo = mid; else hi = mid - 1; }
+    const s = seg[lo]; return s.sec + (tk - s.tick) * s.us / 1e6 / div;
+  };
+  const info = [];
+  tracks.forEach((tr, ti) => {
+    const open = new Map(), notes = [];
+    const mk = (s, et) => { const t = t2s(s.tick); return { t, d: Math.max(0.03, t2s(et) - t), m: s.m, v: s.v, ch: s.ch, trk: info.length }; };
+    tr.evs.forEach(e => {
+      const key = e.ch * 128 + e.m;
+      if (e.on) { if (!open.has(key)) open.set(key, []); open.get(key).push(e); }
+      else { const a = open.get(key); if (a && a.length) notes.push(mk(a.shift(), e.tick)); }
+    });
+    open.forEach(a => a.forEach(s => notes.push(mk(s, tr.lastTick))));
+    if (!notes.length) return;
+    const drum = notes.filter(n => n.ch === 9).length > notes.length / 2;
+    notes.sort((a, b) => a.t - b.t || a.m - b.m);
+    info.push({ idx: info.length, name: tr.name || ('音軌 ' + (ti + 1)), count: notes.length, drum,
+      min: Math.min(...notes.map(n => n.m)), max: Math.max(...notes.map(n => n.m)), notes });
+  });
+  return { fmt, div, tracks: info };
+}
+
+/* ---------- 軌跡:旋律節點與轉移邊 ---------- */
+function buildPath(notes, mode) {
+  const ns = notes.slice().sort((a, b) => a.t - b.t || a.m - b.m);
+  if (mode === 'all') return ns.map(n => ({ t: n.t, m: n.m }));
+  const out = []; let i = 0;                                  // skyline:同時發音只取最高音
+  while (i < ns.length) {
+    let j = i, best = ns[i];
+    while (j + 1 < ns.length && ns[j + 1].t - ns[i].t < 0.03) { j++; if (ns[j].m > best.m) best = ns[j]; }
+    out.push({ t: ns[i].t, m: best.m }); i = j + 1;
+  }
+  return out;
+}
+function buildEdges(path, layout, wedges) {
+  const mp = new Map(); let prev = null;
+  path.forEach((n, i) => {
+    const c = noteToCell(n.m, layout, wedges);
+    if (prev) {
+      const key = prev.idx * 1000 + c.idx; let e = mp.get(key);
+      if (!e) { e = { a: prev.idx, b: c.idx, count: 0, first: i }; mp.set(key, e); }
+      e.count++;
+    }
+    prev = c;
+  });
+  return [...mp.values()];
+}
+// ==CORE-END==
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const star = buildStar();
+const cells = star.cells, wedges = star.wedges;
+const S = { layout: 'chromatic', song: null, tracksOn: new Set(), notes: [], dur: 0, maxDur: 0,
+            path: [], pathCells: [], edges: [], selCell: null, lastNote: null };
+const heat = new Float32Array(cells.length), act = new Uint8Array(cells.length);
+const TRAIL = 20;
+
+/* ================= 內建曲目 ================= */
+function seqSong(name, bpm, seq) {
+  const spb = 60 / bpm; let t = 0; const notes = [];
+  seq.forEach(([m, b]) => {
+    const arr = m === null ? [] : (Array.isArray(m) ? m : [m]);
+    arr.forEach(x => notes.push({ t: t * spb, d: b * spb * 0.92, m: x, v: 90, ch: 0, trk: 0 }));
+    t += b;
+  });
+  const ms = notes.map(n => n.m);
+  return { name, tracks: [{ idx: 0, name: '旋律', count: notes.length, drum: false, notes,
+    min: Math.min(...ms), max: Math.max(...ms) }] };
+}
+function songGeometry() {
+  const q = [];
+  for (let m = 60; m <= 84; m++) q.push([m, .25]);                 // 半音階上行(射線依序走一圈又一圈)
+  for (let m = 83; m >= 60; m--) q.push([m, .25]);
+  [[60, 64, 68], [62, 66, 70]].forEach(tri => {                      // ▲ C-E-G♯ 與 ▼ D-F♯-A♯(增三和弦)
+    for (let o = 0; o < 2; o++) tri.forEach(x => q.push([x + 12 * o, .3]));
+    q.push([tri.map(x => x + 12), 1.2]);
+  });
+  [60, 62, 64, 66, 68, 70, 72, 70, 68, 66, 64, 62, 60].forEach(x => q.push([x, .3])); // 全音音階
+  q.push([null, .5]);
+  for (let o = 0; o < 2; o++) for (let i = 0; i < 12; i++) q.push([60 + 12 * o + (7 * i) % 12, .4]); // 五度圈走訪
+  q.push([[60, 64, 67], 2]);
+  return seqSong('示範:十二音螺旋 + 增三和弦 + 五度圈', 110, q);
+}
+function songPenta() {
+  const A4 = 69, B4 = 71, Cs5 = 73, E5 = 76, Fs5 = 78, A5 = 81, B5 = 83, Cs6 = 85, E6 = 88;
+  const q = [
+    [A4, 1], [Cs5, .5], [E5, .5], [Fs5, 1], [E5, 1], [Cs5, .5], [B4, .5], [A4, 1], [B4, 2],
+    [E5, 1], [Fs5, .5], [A5, .5], [B5, 1], [A5, 1], [Fs5, .5], [E5, .5], [Cs5, 1], [E5, 2],
+    [A5, .5], [B5, .5], [Cs6, 1], [E6, 1], [Cs6, 1], [B5, .5], [A5, .5], [Fs5, 1], [A5, 2],
+    [Fs5, .5], [E5, .5], [Cs5, .5], [B4, .5], [A4, 1], [Cs5, 1], [E5, .5], [E5, .5], [Cs5, .5], [B4, .5], [A4, 3]];
+  return seqSong('示範:A 大調五聲音階旋律(A B C♯ E F♯)', 84, q);
+}
+function songOde() {
+  const E = 64, F = 65, G = 67, D = 62, C = 60;
+  const a = [E, E, F, G, G, F, E, D, C, C, D, E];
+  const q = [];
+  a.forEach(m => q.push([m, 1])); q.push([E, 1.5], [D, .5], [D, 2]);
+  a.forEach(m => q.push([m, 1])); q.push([D, 1.5], [C, .5], [C, 2]);
+  return seqSong('貝多芬《歡樂頌》(C 大調,白鍵)', 112, q);
+}
+const BUILTIN = [songGeometry, songPenta, songOde].map(f => f());
+
+/* ================= 音訊 ================= */
+let AC = null, master = null;
+function ensureAudio() {
+  if (!AC) {
+    try {
+      const C = window.AudioContext || window.webkitAudioContext; AC = new C();
+      const comp = AC.createDynamicsCompressor(); master = AC.createGain();
+      master.gain.value = +$('vol').value; master.connect(comp); comp.connect(AC.destination);
+    } catch (e) { AC = null; }
+  }
+  if (AC && AC.state === 'suspended') AC.resume();
+  return !!AC;
+}
+function voice(m, when, dur, vel) {
+  if (!AC) return;
+  const f = 440 * Math.pow(2, (m - 69) / 12), peak = .17 * Math.max(.1, vel / 127);
+  const g = AC.createGain(); g.connect(master);
+  const tb = $('timbre').value; let parts, end;
+  if (tb === 'flute') {
+    parts = [['sine', 1, 1], ['sine', 2, .2], ['sine', 3, .05]];
+    g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(peak, when + .045);
+    const hold = Math.max(when + .06, when + dur - .05);
+    g.gain.setValueAtTime(peak, hold); g.gain.linearRampToValueAtTime(0, hold + .14); end = hold + .16;
+  } else {
+    const bell = tb === 'bell';
+    parts = bell ? [['sine', 1, 1], ['sine', 2.76, .35], ['sine', 5.4, .15]] : [['triangle', 1, 1], ['sine', 2, .3], ['sine', 3, .1]];
+    const dec = bell ? 2.4 : Math.max(.8, Math.min(2.4, dur * 1.6));
+    g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(peak * 1.3, when + .006);
+    g.gain.exponentialRampToValueAtTime(.0004, when + dec); end = when + dec + .02;
+  }
+  parts.forEach(([type, mul, gn]) => {
+    const o = AC.createOscillator(); o.type = type; o.frequency.value = f * mul;
+    const og = AC.createGain(); og.gain.value = gn; o.connect(og); og.connect(g);
+    o.start(when); o.stop(end + .02);
+  });
+}
+
+/* ================= 曲目 / 音軌 / 軌跡 ================= */
+function setSong(song) {
+  S.song = song;
+  S.tracksOn = new Set(song.tracks.filter(t => !t.drum).map(t => t.idx));
+  if (!S.tracksOn.size) song.tracks.forEach(t => S.tracksOn.add(t.idx));
+  buildTrackUI(); applyTracks(true);
+}
+function buildTrackUI() {
+  const box = $('tracks'); box.innerHTML = '';
+  if (S.song.tracks.length < 2) return;
+  const lab = document.createElement('span'); lab.textContent = '音軌:'; lab.style.color = 'var(--dim)'; box.appendChild(lab);
+  S.song.tracks.forEach(t => {
+    const l = document.createElement('label'), c = document.createElement('input');
+    c.type = 'checkbox'; c.checked = S.tracksOn.has(t.idx);
+    c.onchange = () => { c.checked ? S.tracksOn.add(t.idx) : S.tracksOn.delete(t.idx); applyTracks(false); };
+    l.appendChild(c);
+    l.appendChild(document.createTextNode(` ${t.name}(${t.count} 音 ${noteName(t.min)}–${noteName(t.max)}${t.drum ? ' · 打擊' : ''})`));
+    box.appendChild(l);
+  });
+}
+function applyTracks(reset) {
+  const notes = [];
+  S.song.tracks.forEach(t => { if (S.tracksOn.has(t.idx)) for (const n of t.notes) notes.push(n); });
+  notes.sort((a, b) => a.t - b.t || a.m - b.m);
+  S.notes = notes; S.dur = 0; S.maxDur = 0;
+  for (const n of notes) { if (n.t + n.d > S.dur) S.dur = n.t + n.d; if (n.d > S.maxDur) S.maxDur = n.d; }
+  rebuildPath();
+  if (reset) stop(); else { P.pos = Math.min(P.pos, S.dur); seekIdx(); if (P.playing) rebase(); }
+  updateStats(); updateTime();
+}
+function rebuildPath() {
+  S.path = buildPath(S.notes, $('pathMode').value);
+  S.pathCells = S.path.map(n => noteToCell(n.m, S.layout, wedges));
+  S.edges = buildEdges(S.path, S.layout, wedges);
+}
+
+/* ================= 播放引擎 ================= */
+const P = { playing: false, pos: 0, t0: 0, pos0: 0, si: 0, vi: 0, pi: 0, tempo: 1 };
+const clock = () => AC ? AC.currentTime : performance.now() / 1000;
+function lb(arr, t) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].t < t) lo = m + 1; else hi = m; } return lo; }
+function seekIdx() { P.si = lb(S.notes, P.pos); P.vi = P.si; P.pi = lb(S.path, P.pos); }
+function rebase() { P.pos0 = P.pos; P.t0 = clock(); }
+function play() {
+  if (!S.notes.length) return; ensureAudio();
+  if (P.pos >= S.dur - .01) P.pos = 0;
+  seekIdx(); rebase(); P.playing = true; $('btnPlay').textContent = '⏸ 暫停';
+}
+function pause() { P.playing = false; $('btnPlay').textContent = '▶ 播放'; }
+function stop() { pause(); P.pos = 0; seekIdx(); heat.fill(0); act.fill(0); S.lastNote = null; updateTime(); updateNow(); }
+function tick(dt) {
+  if (P.playing) {
+    P.pos = P.pos0 + (clock() - P.t0) * P.tempo;
+    const now = clock(), look = .18 * P.tempo;
+    while (P.si < S.notes.length && S.notes[P.si].t < P.pos + look) {
+      const n = S.notes[P.si++], when = P.t0 + (n.t - P.pos0) / P.tempo;
+      if (AC && when > now - .03) voice(n.m, Math.max(when, now), n.d / P.tempo, n.v);
+    }
+    while (P.vi < S.notes.length && S.notes[P.vi].t <= P.pos) {
+      const n = S.notes[P.vi++]; heat[noteToCell(n.m, S.layout, wedges).idx] = 1; S.lastNote = n.m;
+    }
+    while (P.pi < S.path.length && S.path[P.pi].t <= P.pos) P.pi++;
+    if (P.pos >= S.dur + .25) {
+      if ($('btnRep').classList.contains('on')) { P.pos = 0; seekIdx(); rebase(); heat.fill(0); }
+      else { P.pos = S.dur; pause(); }
+    }
+  }
+  act.fill(0);
+  for (let i = Math.min(P.vi, S.notes.length) - 1; i >= 0; i--) {
+    const n = S.notes[i]; if (n.t + S.maxDur < P.pos) break;
+    if (n.t <= P.pos && n.t + n.d > P.pos) act[noteToCell(n.m, S.layout, wedges).idx] = 1;
+  }
+  const k = Math.exp(-dt / .9); for (let i = 0; i < heat.length; i++) heat[i] *= k;
+  updateTime(); updateNow();
+}
+const fmt = s => { s = Math.max(0, s); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); };
+let lastTimeTxt = '';
+function updateTime() {
+  const t = fmt(P.pos) + ' / ' + fmt(S.dur);
+  if (t !== lastTimeTxt) { $('time').textContent = t; lastTimeTxt = t; }
+  if (document.activeElement !== $('seek')) $('seek').value = S.dur ? Math.round(P.pos / S.dur * 1000) : 0;
+}
+let lastNowTxt = null;
+function updateNow() {
+  const t = S.lastNote === null ? '—' : noteName(S.lastNote) + '(MIDI ' + S.lastNote + ')';
+  if (t !== lastNowTxt) { lastNowTxt = t; const e = $('nowNote'); if (e) e.textContent = t; }
+}
+
+/* ================= 資訊面板 ================= */
+function updateStats() {
+  const ns = S.notes; if (!ns.length) { $('info').innerHTML = '<span class="dim">這個檔案沒有可用的音符</span>'; return; }
+  const cnt = new Array(12).fill(0); let mn = 999, mx = -1;
+  for (const n of ns) { cnt[n.m % 12]++; if (n.m < mn) mn = n.m; if (n.m > mx) mx = n.m; }
+  const used = cnt.map((c, i) => [i, c]).filter(x => x[1]).sort((a, b) => b[1] - a[1]).map(x => NAMES[x[0]] + '×' + x[1]).join(' ');
+  const loops = S.edges.filter(e => e.a === e.b).length;
+  const sel = S.selCell ? cellInfo(S.selCell) : '<span class="dim">點任一個六角格,可看它的音名、射線、八度與 D 軸鏡像</span>';
+  $('info').innerHTML =
+    `<div><b>${S.song.name}</b> · ${ns.length} 音 · ${fmt(S.dur)} · 音域 ${noteName(mn)}–${noteName(mx)} · 目前音:<b id="nowNote">—</b></div>` +
+    `<div class="dim">使用的音級(${cnt.filter(c => c).length} 個):${used}</div>` +
+    `<div class="dim">軌跡節點 ${S.path.length} · 不同轉移 ${S.edges.length}(自環 ${loops})</div>` +
+    `<div>${sel}</div>`;
+  lastNowTxt = null; updateNow();
+}
+function cellInfo(c) {
+  const m = cellToNote(c, S.layout), pc = m % 12, mir = (4 - pc + 12) % 12;
+  return `<b>${noteName(m)}</b>(MIDI ${m})· 射線 ${c.k}(${c.k * 30}°)· 由內向外第 ${c.rank + 1} 格 · D 軸鏡像音級:<b>${NAMES[mir]}</b>(青色虛線標出)`;
+}
+
+/* ================= 共用繪圖 ================= */
+function hexPath(ctx, x, y, s) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) { const a = (-90 + 60 * i) * Math.PI / 180, X = x + s * Math.cos(a), Y = y + s * Math.sin(a); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
+  ctx.closePath();
+}
+const cellPc = c => pcOfWedge(c.k, S.layout);
+function cellFill(c, h, shade, alpha) {
+  const L0 = 14 + c.rank * 2.3, L = (L0 + (72 - L0) * h) * (shade || 1), Sx = 46 + 44 * h;
+  return `hsl(${cellPc(c) * 30} ${Sx}% ${L}% / ${alpha === undefined ? 1 : alpha})`;
+}
+function gradCol(f, a) {   // 藍 → 紅
+  f = Math.max(0, Math.min(1, f));
+  return `rgba(${Math.round(60 + 195 * f)},${Math.round(130 - 70 * f)},${Math.round(255 - 195 * f)},${a})`;
+}
+const heatOf = c => Math.min(1, Math.max(heat[c.idx], act[c.idx] ? 1 : 0));
+
+/* ================= 平面:六角星形六角格 ================= */
+const flat = { cv: $('cvFlat') }; flat.ctx = flat.cv.getContext('2d');
+function flatEdge(ctx, a, b, su, cx, cy, col, lw) {
+  const A = cells[a], B = cells[b], ax = cx + A.x * su, ay = cy + A.y * su;
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  ctx.beginPath();
+  if (a === b) {
+    const ang = Math.atan2(A.y, A.x || 1e-6); ctx.arc(ax + Math.cos(ang) * .42 * su, ay + Math.sin(ang) * .42 * su, .3 * su, 0, Math.PI * 2);
+  } else { ctx.moveTo(ax, ay); ctx.lineTo(cx + B.x * su, cy + B.y * su); }
+  ctx.stroke();
+}
+function drawFlat() {
+  const cv = flat.cv, ctx = flat.ctx, W = cv.width, H = cv.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0d1426'; ctx.fillRect(0, 0, W, H);
+  const su = (Math.min(W, H) / 2 - 14 * DPR) / (RR * SQ3 + 1.15), cx = W / 2, cy = H / 2, rs = su / SQ3 * .93;
+  flat.su = su; flat.cx = cx; flat.cy = cy;
+  ctx.lineWidth = DPR;
+  for (const c of cells) {
+    hexPath(ctx, cx + c.x * su, cy + c.y * su, rs);
+    ctx.fillStyle = cellFill(c, heatOf(c)); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.stroke();
+  }
+  ctx.save(); ctx.setLineDash([4 * DPR, 4 * DPR]); hexPath(ctx, cx, cy, rs); ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke(); ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = `${Math.round(su * .3)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('空', cx, cy);
+  // 鏡像楔形
+  if (S.selCell) {
+    const mir = (4 - cellPc(S.selCell) + 12) % 12;
+    ctx.save(); ctx.setLineDash([3 * DPR, 3 * DPR]); ctx.strokeStyle = 'rgba(80,200,255,.9)'; ctx.lineWidth = 1.6 * DPR;
+    for (const c of cells) if (cellPc(c) === mir) { hexPath(ctx, cx + c.x * su, cy + c.y * su, rs); ctx.stroke(); }
+    ctx.restore();
+  }
+  // 六角星三角
+  if ($('cTri').checked) {
+    ctx.lineWidth = 1.6 * DPR;
+    [[0, 120, 240], [60, 180, 300]].forEach((tri, i) => {
+      ctx.beginPath();
+      tri.forEach((t, j) => { const a = t * Math.PI / 180, X = cx + Math.sin(a) * RR * SQ3 * su, Y = cy - Math.cos(a) * RR * SQ3 * su; j ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.closePath(); ctx.strokeStyle = i ? 'rgba(80,200,255,.6)' : 'rgba(255,209,102,.7)'; ctx.stroke();
+    });
+  }
+  // 射線與音級
+  if ($('cRays').checked) {
+    ctx.font = `${Math.round(su * .42)}px system-ui`;
+    for (let k = 0; k < 12; k++) {
+      const a = k * 30 * Math.PI / 180, R = (k % 2 === 0 ? RR * SQ3 : RR), dx = Math.sin(a), dy = -Math.cos(a);
+      ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = DPR; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + dx * R * su, cy + dy * R * su); ctx.stroke();
+      const pc = pcOfWedge(k, S.layout), rr = R + (k % 2 === 0 ? 1.0 : 1.05);
+      ctx.fillStyle = `hsl(${pc * 30} 75% 72%)`; ctx.fillText(NAMES[pc], cx + dx * rr * su, cy + dy * rr * su);
+    }
+  }
+  // 發聲中的格子加光暈
+  ctx.save();
+  for (const c of cells) if (act[c.idx] || heat[c.idx] > .5) {
+    ctx.shadowColor = `hsl(${cellPc(c) * 30} 100% 65%)`; ctx.shadowBlur = 16 * DPR * heatOf(c);
+    hexPath(ctx, cx + c.x * su, cy + c.y * su, rs); ctx.fillStyle = cellFill(c, heatOf(c)); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 * DPR; ctx.stroke();
+  }
+  ctx.restore();
+  if (S.selCell) { hexPath(ctx, cx + S.selCell.x * su, cy + S.selCell.y * su, rs * 1.03); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.2 * DPR; ctx.stroke(); }
+  // 音名
+  if ($('cLabel').checked) {
+    ctx.font = `${Math.round(su * .3)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const c of cells) { ctx.fillStyle = heatOf(c) > .55 ? '#111' : 'rgba(255,255,255,.72)'; ctx.fillText(noteName(cellToNote(c, S.layout)), cx + c.x * su, cy + c.y * su + .02 * su); }
+  }
+  // 全曲軌跡
+  const N = Math.max(1, S.path.length - 1);
+  if ($('cPathAll').checked) {
+    for (const e of S.edges) flatEdge(ctx, e.a, e.b, su, cx, cy, gradCol(e.first / N, .3), (.8 + Math.min(3, Math.log2(e.count + 1))) * DPR);
+  }
+  // 即時尾跡
+  if ($('cTrail').checked && S.pathCells.length) {
+    const cur = Math.min(P.pi - 1, S.pathCells.length - 1);
+    if (cur >= 0) {
+      const from = Math.max(0, cur - TRAIL);
+      for (let i = from; i < cur; i++) {
+        const f = (i - from + 1) / (cur - from + 1);
+        flatEdge(ctx, S.pathCells[i].idx, S.pathCells[i + 1].idx, su, cx, cy, gradCol(i / N, .3 + .65 * f), (1.4 + 2.6 * f) * DPR);
+      }
+      const c = S.pathCells[cur]; ctx.beginPath(); ctx.arc(cx + c.x * su, cy + c.y * su, .26 * su, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * DPR; ctx.stroke();
+    }
+  }
+}
+
+/* ================= 3D:梅爾卡巴矩陣 ================= */
+const c3 = { cv: $('cv3d'), drag: false }; c3.ctx = c3.cv.getContext('2d');
+const cam = { yaw: .5, pitch: .62, zoom: 1 };
+const hit3 = [];
+function merkabaSegs(angA, angB) {
+  const Rb = RR * SQ3, Ht = Rb * Math.SQRT2, segs = [];
+  const tri = (deg, y, ang) => [0, 120, 240].map(d => { const a = (d + deg + ang) * Math.PI / 180; return [Math.sin(a) * Rb, y, -Math.cos(a) * Rb]; });
+  [[0, -Ht / 4, 3 * Ht / 4, angA, 0], [60, Ht / 4, -3 * Ht / 4, angB, 1]].forEach(([deg, yb, ya, ang, w]) => {
+    const t = tri(deg, yb, ang), ap = [0, ya, 0];
+    for (let i = 0; i < 3; i++) { segs.push([t[i], t[(i + 1) % 3], w]); segs.push([t[i], ap, w]); }
+  });
+  return segs;
+}
+function drawCube(dt, now) {
+  const cv = c3.cv, ctx = c3.ctx, W = cv.width, H = cv.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0d1426'; ctx.fillRect(0, 0, W, H);
+  if ($('cSpin').checked && !c3.drag) cam.yaw += dt * .22;
+  const cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const D = 30 / cam.zoom, F = (W / 19) * 30, ortho = $('cOrtho').checked, mx = W / 2, my = H / 2;
+  const P3 = (X, Y, Z) => {
+    const x1 = X * cyw + Z * syw, z1 = -X * syw + Z * cyw, y2 = Y * cp - z1 * sp, z2 = Y * sp + z1 * cp;
+    const k = ortho ? F / D : F / (D - z2);
+    return [mx + x1 * k, my - y2 * k, z2, k];
+  };
+  const hs = +$('hs').value, span = 9 * hs, yOf = m => (Math.min(119, m) / 119 - .5) * span, yF = -(span / 2) - 1.6;
+  const shade = z => .72 + .28 * Math.max(0, Math.min(1, (z + 9) / 18)), rs = 1 / SQ3 * .93;
+  const poly = pts => { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); };
+  const hexPts = (x, Y, z, r) => { const o = []; for (let i = 0; i < 6; i++) { const a = (-90 + 60 * i) * Math.PI / 180; o.push(P3(x + r * Math.cos(a), Y, z + r * Math.sin(a))); } return o; };
+  const cellPt = (c, dy) => P3(c.x, yOf(cellToNote(c, S.layout)) + (dy || 0), c.y);
+
+  // 地面:平面投影
+  for (const c of cells) {
+    const h = heatOf(c); poly(hexPts(c.x, yF, c.y, rs));
+    ctx.fillStyle = cellFill(c, h, 1, .12 + .55 * h); ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = DPR; ctx.stroke();
+  }
+  if ($('cTri').checked) {
+    ctx.lineWidth = 1.3 * DPR;
+    [[0, 120, 240], [60, 180, 300]].forEach((tri, i) => {
+      poly(tri.map(t => { const a = t * Math.PI / 180; return P3(Math.sin(a) * RR * SQ3, yF, -Math.cos(a) * RR * SQ3); }));
+      ctx.strokeStyle = i ? 'rgba(80,200,255,.5)' : 'rgba(255,209,102,.55)'; ctx.stroke();
+    });
+  }
+  // 依深度排序的物件:六角板與梅爾卡巴框
+  const items = []; hit3.length = 0;
+  if ($('cFrame').checked) {
+    const t = now / 1000, cnt = $('cCounter').checked;
+    for (const [a, b, w] of merkabaSegs(cnt ? t * 14 : 0, cnt ? -t * 14 : 0)) {
+      const pa = P3(a[0], a[1], a[2]), pb = P3(b[0], b[1], b[2]);
+      items.push({ z: (pa[2] + pb[2]) / 2, f: () => {
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]);
+        ctx.strokeStyle = w ? 'rgba(80,200,255,.6)' : 'rgba(255,209,102,.65)'; ctx.lineWidth = 1.4 * DPR; ctx.stroke();
+      } });
+    }
+  }
+  const showLabel = $('cLabel').checked;
+  for (const c of cells) {
+    const note = cellToNote(c, S.layout), Y = yOf(note), pts = hexPts(c.x, Y, c.y, rs), ctr = P3(c.x, Y, c.y), h = heatOf(c), on = act[c.idx];
+    hit3.push({ c, x: ctr[0], y: ctr[1], r: rs * ctr[3], z: ctr[2] });
+    items.push({ z: ctr[2], f: () => {
+      if (h > .12) { const fl = P3(c.x, yF, c.y); ctx.beginPath(); ctx.moveTo(ctr[0], ctr[1]); ctx.lineTo(fl[0], fl[1]); ctx.strokeStyle = `rgba(255,255,255,${.5 * h})`; ctx.lineWidth = DPR; ctx.stroke(); }
+      poly(pts); ctx.fillStyle = cellFill(c, h, shade(ctr[2]), .93); ctx.fill();
+      ctx.strokeStyle = on ? '#fff' : 'rgba(255,255,255,.2)'; ctx.lineWidth = (on ? 2 : 1) * DPR; ctx.stroke();
+      if (showLabel && ctr[3] > 16 * DPR / 1.2) {
+        ctx.font = `${Math.round(ctr[3] * .3)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = h > .55 ? '#111' : 'rgba(255,255,255,.78)'; ctx.fillText(noteName(note), ctr[0], ctr[1]);
+      }
+    } });
+  }
+  items.sort((a, b) => a.z - b.z); items.forEach(it => it.f());
+  if (S.selCell) { const pts = hexPts(S.selCell.x, yOf(cellToNote(S.selCell, S.layout)), S.selCell.y, rs * 1.04); poly(pts); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.2 * DPR; ctx.stroke(); }
+
+  // 軌跡(畫在最上層)
+  const N = Math.max(1, S.path.length - 1);
+  const edge3 = (a, b, col, lw, dy) => {
+    const A = cells[a], B = cells[b], pa = cellPt(A, dy), pb = cellPt(B, dy);
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
+    if (a === b) ctx.arc(pa[0], pa[1] - .38 * pa[3], .28 * pa[3], 0, Math.PI * 2); else { ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); }
+    ctx.stroke();
+  };
+  if ($('cPathAll').checked) {
+    const es = S.edges.length > 700 ? S.edges.slice().sort((a, b) => b.count - a.count).slice(0, 700) : S.edges;
+    for (const e of es) edge3(e.a, e.b, gradCol(e.first / N, .32), (.8 + Math.min(2.5, Math.log2(e.count + 1))) * DPR, .06);
+  }
+  if ($('cTrail').checked && S.pathCells.length) {
+    const cur = Math.min(P.pi - 1, S.pathCells.length - 1);
+    if (cur >= 0) {
+      const from = Math.max(0, cur - TRAIL);
+      for (let i = from; i < cur; i++) {
+        const f = (i - from + 1) / (cur - from + 1), a = S.pathCells[i], b = S.pathCells[i + 1];
+        edge3(a.idx, b.idx, gradCol(i / N, .3 + .65 * f), (1.5 + 2.6 * f) * DPR, .1);
+        const pa = P3(a.x, yF, a.y), pb = P3(b.x, yF, b.y);            // 軌跡在地面的投影
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.strokeStyle = gradCol(i / N, .25 + .4 * f); ctx.lineWidth = 1.6 * DPR; ctx.stroke();
+      }
+      const c = S.pathCells[cur], p = cellPt(c, .1);
+      ctx.save(); ctx.shadowColor = '#fff'; ctx.shadowBlur = 14 * DPR; ctx.beginPath(); ctx.arc(p[0], p[1], .3 * p[3], 0, Math.PI * 2);
+      ctx.fillStyle = '#fff'; ctx.fill(); ctx.restore();
+    }
+  }
+}
+
+/* ================= 互動 ================= */
+function selectCell(c, silent) {
+  S.selCell = c; const m = cellToNote(c, S.layout);
+  if (!silent) { ensureAudio(); if (AC) voice(m, AC.currentTime + .01, .7, 100); heat[c.idx] = 1.2; S.lastNote = m; }
+  updateStats();
+}
+function canvasPos(cv, e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; }
+flat.cv.addEventListener('click', e => {
+  const [px, py] = canvasPos(flat.cv, e); let best = null, bd = 1e9;
+  for (const c of cells) { const d = Math.hypot(px - (flat.cx + c.x * flat.su), py - (flat.cy + c.y * flat.su)); if (d < bd) { bd = d; best = c; } }
+  if (best && bd < flat.su * .6) selectCell(best);
+});
+(() => {
+  let down = null, moved = 0;
+  c3.cv.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; moved = 0; c3.drag = true; c3.cv.setPointerCapture(e.pointerId); });
+  c3.cv.addEventListener('pointermove', e => {
+    if (!down) return; const dx = e.clientX - down[0], dy = e.clientY - down[1]; moved += Math.abs(dx) + Math.abs(dy);
+    down = [e.clientX, e.clientY]; cam.yaw += dx * .008; cam.pitch = Math.max(.02, Math.min(Math.PI / 2, cam.pitch + dy * .006));
+  });
+  c3.cv.addEventListener('pointerup', e => {
+    c3.drag = false;
+    if (down && moved < 6) {
+      const [px, py] = canvasPos(c3.cv, e); let best = null;
+      for (const h of hit3) if (Math.hypot(px - h.x, py - h.y) < h.r * 1.05 && (!best || h.z > best.z)) best = h;
+      if (best) selectCell(best.c);
+    }
+    down = null;
+  });
+  c3.cv.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = Math.max(.5, Math.min(2.2, cam.zoom * Math.exp(-e.deltaY * .001))); }, { passive: false });
+})();
+$('btnTop').onclick = () => { cam.pitch = Math.PI / 2; cam.yaw = 0; cam.zoom = 1; $('cSpin').checked = false; $('cOrtho').checked = true; };
+$('btnSide').onclick = () => { cam.pitch = .12; };
+$('btn3dReset').onclick = () => { cam.yaw = .5; cam.pitch = .62; cam.zoom = 1; $('cSpin').checked = true; $('cOrtho').checked = false; $('hs').value = .8; };
+$('btnFlat').onclick = () => { $('hs').value = 0; };
+
+$('btnPlay').onclick = () => P.playing ? pause() : play();
+$('btnStop').onclick = stop;
+$('btnRep').onclick = e => e.currentTarget.classList.toggle('on');
+$('seek').addEventListener('input', e => { P.pos = +e.target.value / 1000 * S.dur; seekIdx(); heat.fill(0); if (P.playing) rebase(); updateTime(); });
+$('tempo').addEventListener('input', e => { P.tempo = +e.target.value; $('tempoV').textContent = P.tempo.toFixed(2) + '×'; if (P.playing) rebase(); });
+$('vol').addEventListener('input', e => { if (master) master.gain.value = +e.target.value; });
+$('layout').addEventListener('change', e => { S.layout = e.target.value; heat.fill(0); rebuildPath(); seekIdx(); updateStats(); });
+$('pathMode').addEventListener('change', () => { rebuildPath(); seekIdx(); updateStats(); });
+$('song').addEventListener('change', e => { const i = +e.target.value; if (i < BUILTIN.length) setSong(BUILTIN[i]); else if (loaded[i - BUILTIN.length]) setSong(loaded[i - BUILTIN.length]); });
+document.addEventListener('keydown', e => { if (e.code === 'Space' && !/INPUT|SELECT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); $('btnPlay').click(); } });
+
+const loaded = [];
+async function loadFile(file) {
+  try {
+    const r = parseMidi(await file.arrayBuffer());
+    if (!r.tracks.length) throw new Error('檔案中沒有找到音符');
+    r.name = '📂 ' + file.name; loaded.push(r);
+    const o = document.createElement('option'); o.value = BUILTIN.length + loaded.length - 1; o.textContent = r.name; $('song').appendChild(o); $('song').value = o.value;
+    setSong(r);
+  } catch (e) { alert('讀取 MIDI 失敗:' + e.message); }
+}
+$('file').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
+['dragover', 'drop'].forEach(ev => document.addEventListener(ev, e => {
+  e.preventDefault(); if (ev === 'drop' && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+}));
+
+/* ================= 啟動 ================= */
+BUILTIN.forEach((s, i) => { const o = document.createElement('option'); o.value = i; o.textContent = s.name; $('song').appendChild(o); });
+function resize() {
+  for (const o of [flat, c3]) { const w = Math.max(240, Math.round(o.cv.getBoundingClientRect().width * DPR)); if (o.cv.width !== w) { o.cv.width = w; o.cv.height = w; } }
+}
+new ResizeObserver(resize).observe(document.querySelector('.views')); window.addEventListener('resize', resize); resize();
+setSong(BUILTIN[0]);
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  try { tick(dt); drawFlat(); drawCube(dt, now); } catch (e) { console.error(e); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+
+</script>
+</body>
+</html>
